@@ -3,11 +3,15 @@ const dotenv = require("dotenv");
 const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
 const userRoutes = require("./routes/userRoutes");
+const vulnerabilityRoutes = require('./routes/vulnerabilityRoutes')
 
 dotenv.config();
 const app = express();
+
 app.use(bodyParser.json());
+
 app.use("/api", userRoutes);
+app.use("/api", vulnerabilityRoutes);
 
 const PORT = process.env.PORT;
 const MONGO_URL = process.env.MONGODB_URL;
