@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SOC — Gestion des Incidents</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    header h1 { font-size: 20px; color: #58a6ff; }
+    header span { font-size: 12px; color: #8b949e; }
+
+    .container { max-width: 1100px; margin: 32px auto; padding: 0 24px; }
+
+    /* ── FORM CARD ── */
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 32px;
+    }
+
+    .card h2 {
+      font-size: 16px;
+      color: #58a6ff;
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group.full { grid-column: 1 / -1; }
+
+    label { font-size: 13px; color: #8b949e; }
+
+    input, select, textarea {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      color: #e6edf3;
+      padding: 10px 14px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color .2s;
+      width: 100%;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: #58a6ff;
+    }
+
+    textarea { resize: vertical; min-height: 90px; }
+
+    .btn {
+      padding: 10px 24px;
+      border-radius: 8px;
+      border: none;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .2s;
+    }
+    .btn:hover { opacity: .85; }
+    .btn-primary { background: #238636; color: #fff; }
+    .btn-danger  { background: #da3633; color: #fff; font-size: 12px; padding: 6px 14px; }
+
+    .form-actions { margin-top: 20px; display: flex; gap: 12px; align-items: center; }
+
+    /* ── TOAST ── */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      padding: 12px 20px; border-radius: 8px;
+      font-size: 14px; font-weight: 600;
+      opacity: 0; transition: opacity .3s;
+      pointer-events: none; z-index: 999;
+    }
+    #toast.show { opacity: 1; }
+    #toast.success { background: #238636; color: #fff; }
+    #toast.error   { background: #da3633; color: #fff; }
+
+    /* ── TABLE ── */
+    .table-wrap { overflow-x: auto; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      background: #0d1117;
+      color: #8b949e;
+      font-weight: 600;
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid #30363d;
+    }
+    td { padding: 12px 14px; border-bottom: 1px solid #21262d; vertical-align: middle; }
+    tr:hover td { background: #1c2128; }
+
+    /* Severity badges */
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .badge.critical { background: #ff000033; color: #ff4444; border: 1px solid #ff4444; }
+    .badge.high     { background: #ff660033; color: #ff8800; border: 1px solid #ff8800; }
+    .badge.medium   { background: #ffa50033; color: #ffcc00; border: 1px solid #ffcc00; }
+    .badge.low      { background: #00800033; color: #00cc66; border: 1px solid #00cc66; }
+
+    .status-dot {
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      display: inline-block;
+    }
+    .dot.open        { background: #58a6ff; }
+    .dot.in-progress { background: #ffa500; }
+    .dot.resolved    { background: #3fb950; }
+    .dot.closed      { background: #8b949e; }
+
+    .empty {
+      text-align: center; padding: 48px;
+      color: #8b949e; font-size: 14px;
+    }
+
+    .filters {
+      display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .filters select { width: auto; }
+  </style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:22px">🛡️</span>
+  <h1> Incident Management</h1>
+  <span style="margin-left:auto" id="userBadge"></span>
+</header>
+
+<div class="container">
+
+  <!-- ── FORM ── -->
+  <div class="card">
+    <h2>➕ Créer un Incident</h2>
+    <div class="form-grid">
+
+      <div class="form-group">
+        <label>Titre *</label>
+        <input id="title" type="text" placeholder="Ex: SQL Injection détectée" />
+      </div>
+
+      <div class="form-group">
+        <label>Sévérité *</label>
+        <select id="severity">
+          <option value="">-- Choisir --</option>
+          <option value="critical">🔴 Critical</option>
+          <option value="high">🟠 High</option>
+          <option value="medium">🟡 Medium</option>
+          <option value="low">🟢 Low</option>
+        </select>
+      </div>
+
+      <div class="form-group full">
+        <label>Description *</label>
+        <textarea id="description" placeholder="Décrivez l'incident ... "></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Assets affectés (séparés par virgule)</label>
+        <input id="affectedAssets" type="text" placeholder="192.168.1.1, server-01" />
+      </div>
+
+      <div class="form-group">
+        <label>Scan Report ID *</label>
+        <input id="scanReportId" type="text" placeholder="ObjectId MongoDB" />
+      </div>
+
+      <div class="form-group">
+        <label>Token JWT *</label>
+        <input id="jwtToken" type="password" placeholder="Bearer token..." />
+      </div>
+
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" onclick="submitIncident()"> Soumettre l'incident</button>
+      <button class="btn" style="background:#21262d;color:#e6edf3" onclick="clearForm()">Effacer</button>
+      <span id="formStatus" style="font-size:13px; color:#8b949e"></span>
+    </div>
+  </div>
+
+  <!-- ── LIST ── -->
+  <div class="card">
+    <h2> Liste des Incidents</h2>
+
+    <div class="filters">
+      <select id="filterSeverity" onchange="loadIncidents()">
+        <option value="">Toutes sévérités</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+
+      <select id="filterStatus" onchange="loadIncidents()">
+        <option value="">Tous statuts</option>
+        <option value="open">Open</option>
+        <option value="in-progress">In Progress</option>
+        <option value="resolved">Resolved</option>
+        <option value="closed">Closed</option>
+      </select>
+
+      <button class="btn" style="background:#21262d;color:#58a6ff" onclick="loadIncidents()">
+        🔄 Rafraîchir
+      </button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Titre</th>
+            <th>Sévérité</th>
+            <th>Statut</th>
+            <th>Assets</th>
+            <th>Créé le</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="incidentTable">
+          <tr><td colspan="6" class="empty">Chargement...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div id="pagination" style="margin-top:16px; font-size:13px; color:#8b949e; text-align:center"></div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+  const API = 'http://localhost:3000/api';
+
+  // ── Helpers ──────────────────────────────────────────────────────
+  function getToken() {
+    return document.getElementById('jwtToken').value.trim();
+  }
+
+  function showToast(msg, type = 'success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `show ${type}`;
+    setTimeout(() => t.className = '', 3000);
+  }
+
+  function formatDate(d) {
+    return new Date(d).toLocaleDateString('fr-FR', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  }
+
+  // ── Soumettre un incident ────────────────────────────────────────
+  async function submitIncident() {
+    const title          = document.getElementById('title').value.trim();
+    const description    = document.getElementById('description').value.trim();
+    const severity       = document.getElementById('severity').value;
+    const scanReportId   = document.getElementById('scanReportId').value.trim();
+    const assetsRaw      = document.getElementById('affectedAssets').value;
+    const affectedAssets = assetsRaw ? assetsRaw.split(',').map(s => s.trim()) : [];
+
+    if (!title || !description || !severity || !scanReportId) {
+      showToast('❌ Veuillez remplir tous les champs requis', 'error');
+      return;
+    }
+
+    const token = getToken();
+    if (!token) {
+      showToast('❌ Token JWT manquant', 'error');
+      return;
+    }
+
+    document.getElementById('formStatus').textContent = '⏳ Envoi en cours...';
+
+    try {
+      const res = await fetch(`${API}/incidents`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ title, description, severity, affectedAssets, scanReportId })
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        showToast('✅ Incident créé avec succès !');
+        clearForm();
+        loadIncidents();
+      } else {
+        showToast(`❌ ${data.message || 'Erreur serveur'}`, 'error');
+      }
+    } catch (err) {
+      showToast('❌ Impossible de joindre le serveur', 'error');
+    } finally {
+      document.getElementById('formStatus').textContent = '';
+    }
+  }
+
+  // ── Charger les incidents ────────────────────────────────────────
+  async function loadIncidents() {
+    const token    = getToken();
+    const severity = document.getElementById('filterSeverity').value;
+    const status   = document.getElementById('filterStatus').value;
+
+    let url = `${API}/incidents?`;
+    if (severity) url += `severity=${severity}&`;
+    if (status)   url += `status=${status}&`;
+
+    const tbody = document.getElementById('incidentTable');
+    tbody.innerHTML = `<tr><td colspan="6" class="empty">⏳ Chargement...</td></tr>`;
+
+    try {
+      const res = await fetch(url, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+
+      if (!res.ok) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">🔒 Token requis pour afficher les incidents</td></tr>`;
+        return;
+      }
+
+      const data = await res.json();
+      const incidents = data.incidents || [];
+
+      if (incidents.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty">Aucun incident trouvé</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = incidents.map(inc => `
+        <tr>
+          <td><strong>${inc.title}</strong></td>
+          <td><span class="badge ${inc.severity}">${inc.severity}</span></td>
+          <td>
+            <span class="status-dot">
+              <span class="dot ${inc.status}"></span>
+              ${inc.status}
+            </span>
+          </td>
+          <td style="color:#8b949e; font-size:12px">
+            ${inc.affectedAssets?.join(', ') || '—'}
+          </td>
+          <td style="color:#8b949e; font-size:12px">${formatDate(inc.createdAt)}</td>
+          <td>
+            <button class="btn btn-danger" onclick="deleteIncident('${inc._id}')">
+              🗑 Supprimer
+            </button>
+          </td>
+        </tr>
+      `).join('');
+
+      const p = data.pagination;
+      document.getElementById('pagination').textContent =
+        `${p.total} incident(s) — Page ${p.currentPage} / ${p.pages}`;
+
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="6" class="empty">❌ Erreur de connexion</td></tr>`;
+    }
+  }
+
+  // ── Supprimer un incident ────────────────────────────────────────
+  async function deleteIncident(id) {
+    if (!confirm('Supprimer cet incident ?')) return;
+    const token = getToken();
+
+    try {
+      const res = await fetch(`${API}/incidents/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (res.ok) {
+        showToast('🗑 Incident supprimé');
+        loadIncidents();
+      } else {
+        showToast('❌ Suppression échouée', 'error');
+      }
+    } catch {
+      showToast('❌ Erreur serveur', 'error');
+    }
+  }
+
+  // ── Reset form ───────────────────────────────────────────────────
+  function clearForm() {
+    ['title','description','affectedAssets','scanReportId'].forEach(id => {
+      document.getElementById(id).value = '';
+    });
+    document.getElementById('severity').value = '';
+  }
+
+  // Chargement initial
+  loadIncidents();
+</script>
+</body>
+</html>
