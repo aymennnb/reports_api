@@ -10,7 +10,8 @@ const {
     activateUser,
     assignPermission,
     removePermission,
-    getUserPermissions
+    getUserPermissions,
+    getAllPermissions
 } = require("../controllers/userController");
 
 const router = express.Router();
@@ -30,6 +31,7 @@ router.delete("/users/:id", verifyToken, isAdmin, deleteUser);
 router.put("/users/:id/activate", verifyToken, isAdmin, activateUser);
 
 // ─── GESTION DES PERMISSIONS ─────────────────────────────────────
+router.get("/permissions", verifyToken, getAllPermissions);
 router.get("/users/:id/permissions", verifyToken, getUserPermissions);
 router.post("/users/:id/permissions", verifyToken, isAdmin, assignPermission);
 router.delete("/users/:id/permissions/:permission_id", verifyToken, isAdmin, removePermission);

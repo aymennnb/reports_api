@@ -1,10 +1,3 @@
-// ── Helper : convertir le chiffre severity Nessus en label lisible ────────────
-const severityLabel = (level) => {
-    const map = { 0: "info", 1: "low", 2: "medium", 3: "high", 4: "critical" };
-    return map[level] ?? "info";
-};
-
-
 // ── Helper : extraire les CVEs depuis ref_information ────────────────────────
 const extractCVEs = (pluginAttributes) => {
     const refs = pluginAttributes?.ref_information?.ref || [];
@@ -78,4 +71,4 @@ const buildSyncPayload = (scanId, scanDetail, pluginMap = {}) => {
 };
 
 
-module.exports = { buildSyncPayload, mapPluginDetails, severityLabel };
+module.exports = { buildSyncPayload, mapPluginDetails };

@@ -1,5 +1,6 @@
 const express = require("express");
 const dotenv = require("dotenv");
+const cors = require("cors");
 const bodyParser = require("body-parser");
 const mongoose = require("mongoose");
 const userRoutes = require("./routes/userRoutes");
@@ -9,6 +10,12 @@ dotenv.config();
 const app = express();
 
 app.use(bodyParser.json());
+
+const corsPort = process.env.PORTCLIENT;
+const corsOptions = {
+  origin: [`http://localhost:5173`],
+};
+app.use(cors(corsOptions));
 
 app.use("/api", userRoutes);
 app.use("/api", vulnerabilityRoutes);

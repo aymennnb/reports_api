@@ -82,7 +82,10 @@ const createUser = async (req, res) => {
 // GET /api/users (utilisateurs authentifié)
 const getUsers = async (req, res) => {
     try {
-        const users = await User.find().select("-password -login_attempts");
+        const users = await User.find({ _id: { $ne: req.user.id } })
+            .select("-password -login_attempts")
+            .sort({ created_at: -1 });
+
         res.status(200).json(users);
     } catch (error) {
         res.status(500).json({ message: "Server error." });
@@ -171,6 +174,16 @@ const activateUser = async (req, res) => {
 
 
 //  GESTION DES PERMISSIONS ════════════════════════════════════════════════════════════════
+// GET /api/permissions
+const getAllPermissions = async (req, res) => {
+    try {
+        const permissions = await Permission.find().sort({ permission_id: 1 });
+        res.status(200).json({ permissions });
+    } catch (error) {
+        res.status(500).json({ message: "Server error." });
+    }
+};
+
 // POST /api/users/:id/permissions (Assigner une permission) — ADMIN seulement
 const assignPermission = async (req, res) => {
     try {
@@ -259,5 +272,6 @@ module.exports = {
     activateUser,
     assignPermission,
     removePermission,
-    getUserPermissions
+    getUserPermissions,
+    getAllPermissions
 };
