@@ -13,7 +13,7 @@ app.use(bodyParser.json());
 
 const corsPort = process.env.PORTCLIENT;
 const corsOptions = {
-  origin: [`http://localhost:5173`],
+  origin: [`http://localhost:${corsPort}`]
 };
 app.use(cors(corsOptions));
 
