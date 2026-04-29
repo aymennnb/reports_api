@@ -10,7 +10,6 @@ const {
   getStats,
 } = require('../controllers/incidentsController');
 
-
 const { verifyToken, isAdmin } = require("../middlewares/authMiddleware");
 
 router.use(verifyToken);
