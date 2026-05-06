@@ -1,5 +1,5 @@
-const nessusService    = require("./nessusService");       // TON fichier existant — NE PAS MODIFIER
-const { buildSyncPayload } = require("../utils/Nessusmapper"); // TON fichier existant
+const nessusService    = require("./nessusService");
+const { buildSyncPayload } = require("../utils/Nessusmapper");
 const Vulnerability    = require("../models/Vulnerability");
 const ImportLogger     = require("../utils/importLogger");
 
@@ -21,14 +21,13 @@ const autoSyncNessus = async (trigger = "scheduler") => {
 
     logger.info("Démarrage de la synchronisation automatique Nessus...");
 
-    // ── ÉTAPE 1 : Récupérer la liste de tous les scans ────────────────────
     let scansData;
     try {
         scansData = await nessusService.getScans();
     } catch (err) {
         logger.error(`Impossible de récupérer les scans Nessus: ${err.message}`);
         await logger.finish({ stats: globalStats, status: "error", error: err.message });
-        throw err; // Le scheduler retry si configuré
+        throw err;
     }
 
     const allScans = scansData.scans || [];
@@ -40,8 +39,6 @@ const autoSyncNessus = async (trigger = "scheduler") => {
         return globalStats;
     }
 
-    // ── ÉTAPE 2 : Traiter chaque scan ─────────────────────────────────────
-    // On ne traite que les scans avec status "completed"
     const completedScans = allScans.filter(s => s.status === "completed");
     logger.info(`${completedScans.length} scan(s) avec status "completed" à traiter`);
 
@@ -49,7 +46,6 @@ const autoSyncNessus = async (trigger = "scheduler") => {
         logger.info(`Traitement du scan: ${scan.name} (ID: ${scan.id})`);
 
         try {
-            // ── ÉTAPE 2a : Détail du scan ──────────────────────────────────
             const scanDetail = await nessusService.getScanById(scan.id);
 
             if (!scanDetail.vulnerabilities?.length) {
@@ -61,7 +57,6 @@ const autoSyncNessus = async (trigger = "scheduler") => {
                 `Scan ${scan.name}: ${scanDetail.vulnerabilities.length} vulnérabilité(s) à analyser`
             );
 
-            // ── ÉTAPE 2b : Détails des plugins ────────────────────────────
             const pluginMap = await nessusService.getAllPluginDetails(
                 scan.id,
                 scanDetail.vulnerabilities
@@ -161,7 +156,6 @@ const applySync = async ({ scan_id, vulnerabilities, hosts, plugin_details }, lo
         }
     }
 
-    // Marquer comme résolues les vulns non vues dans ce scan
     const resolved = await Vulnerability.updateMany(
         { host, status: "open", plugin_id: { $nin: seenPluginIds } },
         { status: "resolved" }

@@ -27,13 +27,13 @@ class ImportLogger {
     }
 
     warn(message) {
-        const msg = `[${this.source.toUpperCase()}] ⚠ ${message}`;
+        const msg = `[${this.source.toUpperCase()}] ${message}`;
         console.warn(msg);
         this.entries.push({ level: "warn", message, timestamp: new Date() });
     }
 
     error(message) {
-        const msg = `[${this.source.toUpperCase()}] ✖ ${message}`;
+        const msg = `[${this.source.toUpperCase()}] ${message}`;
         console.error(msg);
         this.entries.push({ level: "error", message, timestamp: new Date() });
     }
@@ -70,7 +70,7 @@ class ImportLogger {
             });
 
             console.log(
-                `[${this.source.toUpperCase()}] ✓ Log sauvegardé en base — ` +
+                `[${this.source.toUpperCase()}] Log sauvegardé en base — ` +
                 `status: ${status}, durée: ${duration}ms`
             );
         } catch (dbErr) {

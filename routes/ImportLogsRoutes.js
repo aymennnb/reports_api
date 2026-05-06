@@ -7,7 +7,7 @@ const {
     triggerManualImport,
 } = require("../controllers/importLogsController");
 
-const verifyToken = require("../middleware/authMiddleware");
+const { verifyToken, isAdmin } = require("../middlewares/authMiddleware");
 
 // Toutes les routes sont protégées par JWT
 router.use(verifyToken);

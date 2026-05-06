@@ -134,6 +134,31 @@ const updateUser = async (req, res) => {
     }
 };
 
+const Changeinfos = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found." });
+        }
+
+        if (req.body.password) {
+            req.body.password = await bcrypt.hash(req.body.password, 10);
+        }
+
+        const updatedUser = await User.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true }
+        ).select("-password -login_attempts");
+
+        res.status(200).json({ message: "User updated successfully.", user: updatedUser });
+
+    } catch (error) {
+        res.status(500).json({ message: "Server error." });
+    }
+};
+
 // DELETE /api/users/:id (Supprimer un utilisateur) - ADMIN seulement
 const deleteUser = async (req, res) => {
     try {
@@ -268,6 +293,7 @@ module.exports = {
     getUsers,
     getUserById,
     updateUser,
+    Changeinfos,
     deleteUser,
     activateUser,
     assignPermission,

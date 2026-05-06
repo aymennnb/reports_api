@@ -20,10 +20,10 @@ const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 // ── Mapping level → severity ──────────────────────────────────────────────────
 const getSeverityFromLevel = (level) => {
-    if (level >= 15) return "critical";
-    if (level >= 12) return "high";
-    if (level >= 8)  return "medium";
-    return "low";
+    if (level >= 15) return 4;
+    if (level >= 12) return 3;
+    if (level >= 8)  return 2;
+    return 1;
 };
 
 // ── 1. Obtenir un token JWT Wazuh ─────────────────────────────────────────────
@@ -45,7 +45,7 @@ const getWazuhToken = async (logger) => {
         }
     );
 
-    logger.info("Token Wazuh obtenu ✓");
+    logger.info("Token Wazuh obtenu");
     return response.data; // raw=true → token directement en string
 };
 
@@ -79,6 +79,8 @@ const fetchHighSeverityAlerts = async (logger) => {
     return hits;
 };
 
+const severityLabel = { 4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW" };
+
 // ── 3. Traiter les alertes et créer les incidents sans doublons ───────────────
 const processAlerts = async (alerts, logger) => {
     const stats = { created: 0, skipped: 0, errors: 0 };
@@ -90,7 +92,6 @@ const processAlerts = async (alerts, logger) => {
         const agent   = source?.agent   || {};
 
         try {
-            // ── Vérification doublon via alert_id (index unique sparse) ───
             const exists = await Incident.findOne({ alert_id: alertId });
             if (exists) {
                 stats.skipped++;
@@ -100,7 +101,7 @@ const processAlerts = async (alerts, logger) => {
             const severity = getSeverityFromLevel(rule.level);
 
             await new Incident({
-                title: `[${severity.toUpperCase()}] ${rule.description || "Alerte Wazuh"}`,
+                title: `[${severityLabel[severity] || "UNKNOWN"}] ${rule.description || "Alerte Wazuh"}`,
                 description: source?.full_log
                     ? `Rule: ${rule.description}\n\nLog:\n${source.full_log}`
                     : `Rule: ${rule.description || "N/A"} (level ${rule.level})`,
@@ -118,7 +119,6 @@ const processAlerts = async (alerts, logger) => {
             logger.info(`Incident créé: [${severity}] ${rule.description} — agent: ${agent.name}`);
 
         } catch (err) {
-            // Erreur de duplicate key (race condition) → on ignore simplement
             if (err.code === 11000) {
                 stats.skipped++;
             } else {

@@ -6,6 +6,7 @@ const {
     getUsers,
     getUserById,
     updateUser,
+    Changeinfos,
     deleteUser,
     activateUser,
     assignPermission,
@@ -24,8 +25,9 @@ router.post("/auth/login", loginUser);
 // verifyToken ────────────────────────────────────
 // isAdmin ────────────────────────────────────
 router.post("/users", verifyToken, isAdmin, createUser);
-router.get("/users", verifyToken, getUsers);
-router.get("/users/:id", verifyToken, getUserById);
+router.get("/users", verifyToken,isAdmin, getUsers);
+router.get("/users/:id", verifyToken,isAdmin, getUserById);
+router.put("/users/settings/:id", verifyToken, Changeinfos);
 router.put("/users/:id", verifyToken, isAdmin, updateUser);
 router.delete("/users/:id", verifyToken, isAdmin, deleteUser);
 router.put("/users/:id/activate", verifyToken, isAdmin, activateUser);

@@ -32,6 +32,7 @@ const getAllIncidents = async (req, res) => {
         const filter = {};
         if (req.query.status)   filter.status   = req.query.status;
         if (req.query.severity) filter.severity = parseInt(req.query.severity);
+        if (req.query.agent_name) filter.agent_name = req.query.agent_name;
         if (req.query.source)   filter.source   = req.query.source;
         if (req.query.Source)   filter.source   = req.query.Source;
 
