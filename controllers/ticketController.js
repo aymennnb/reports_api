@@ -2,8 +2,10 @@
 
 // ─── Ticket Controller ─────────────────────────────────────────────────────
 //
-// Authorization is enforced BOTH at route-level (ticketRoutes.js middleware)
-// AND inside each handler (defense in depth), mirroring vulnerabilityController.js.
+// Logique d'assignation migrée de "utilisateur unique" → "département Keycloak".
+// Les tickets sont désormais assignés à un Keycloak Group (department.id / department.name).
+// La logique "My Tickets" devient "Department Tickets" : on filtre par les groupes
+// du user connecté.
 
 const Ticket   = require('../models/Ticket')
 const Incident = require('../models/Incident')
@@ -11,47 +13,60 @@ const { KeycloakAdmin } = require('../services/keycloakAdmin')
 const { Types } = require('mongoose')
 const { logAction } = require('../services/journalService')
 
-// ─── Permission helpers (mirrors vulnerabilityController.js exactly) ──────────
+// ─── Permission helpers ────────────────────────────────────────────────────────
 
 const getRoles = (req) => req.keycloakUser?.roles || req.user?.roles || []
-
-const isAdmin = (req) => getRoles(req).includes('admin')
-
+const isAdmin  = (req) => getRoles(req).includes('admin')
 const hasPermission = (req, permissionName) => {
     if (isAdmin(req)) return true
     return getRoles(req).includes(permissionName)
 }
 
-// ─── Misc helpers ─────────────────────────────────────────────────────────────
+// ─── Misc helpers ──────────────────────────────────────────────────────────────
 
 const isValidObjectId = (id) => Types.ObjectId.isValid(id)
 
-// ─── populateTicket ───────────────────────────────────────────────────────────
+// ─── Keycloak Group helpers ────────────────────────────────────────────────────
+
+/**
+ * Récupère tous les groupes Keycloak du realm.
+ * Retourne un tableau de { id, name }.
+ */
+const getAllGroups = async () => {
+    const groups = await KeycloakAdmin.getGroups()   // GET /admin/realms/{realm}/groups
+    return groups.map(g => ({ id: g.id, name: g.name }))
+}
+
+/**
+ * Récupère les groupes Keycloak d'un utilisateur (par son id Keycloak).
+ * Retourne un tableau de { id, name }.
+ */
+const getUserGroups = async (userId) => {
+    const groups = await KeycloakAdmin.getUserGroups(userId) // GET /admin/realms/{realm}/users/{id}/groups
+    return groups.map(g => ({ id: g.id, name: g.name }))
+}
+
+// ─── populateTicket ────────────────────────────────────────────────────────────
+//
+// Enrichit un document Ticket avec :
+//  - incident     : données de l'incident lié
+//  - created_by_user : infos Keycloak du créateur
+//
+// Plus de `assigned_user` : le département est déjà embarqué dans ticket.department.
 
 const populateTicket = async (ticket) => {
     const obj = ticket.toObject({ virtuals: true })
 
     const incident = await Incident.findById(ticket.incident_id).lean()
 
-    let assignedUser  = null
     let createdByUser = null
     try {
-        assignedUser  = await KeycloakAdmin.getUserById(ticket.assigned_to)
         createdByUser = await KeycloakAdmin.getUserById(ticket.created_by)
     } catch (_) {}
 
     return {
         ...obj,
         incident: incident || null,
-        assigned_user: assignedUser
-            ? {
-                  id:        assignedUser.id,
-                  username:  assignedUser.username,
-                  email:     assignedUser.email,
-                  firstName: assignedUser.firstName,
-                  lastName:  assignedUser.lastName,
-              }
-            : { id: ticket.assigned_to },
         created_by_user: createdByUser
             ? {
                   id:        createdByUser.id,
@@ -64,7 +79,22 @@ const populateTicket = async (ticket) => {
     }
 }
 
-// ─── GET /tickets ─────────────────────────────────────────────────────────────
+// ─── GET /tickets/departments ──────────────────────────────────────────────────
+//
+// Retourne la liste des groupes Keycloak utilisables comme départements.
+// Utilisé par les selects frontend pour choisir un département.
+
+const getDepartments = async (req, res) => {
+    try {
+        const departments = await getAllGroups()
+        res.status(200).json({ departments })
+    } catch (error) {
+        console.error('[getDepartments]', error)
+        res.status(500).json({ message: 'Failed to fetch departments from Keycloak.' })
+    }
+}
+
+// ─── GET /tickets ──────────────────────────────────────────────────────────────
 
 const getAllTickets = async (req, res) => {
     try {
@@ -72,10 +102,10 @@ const getAllTickets = async (req, res) => {
         if (!allowed) return res.status(403).json({ message: 'Permission required: VIEW_TICKETS' })
 
         const filter = {}
-        if (req.query.status)      filter.status      = req.query.status
-        if (req.query.priority)    filter.priority    = req.query.priority
-        if (req.query.assigned_to) filter.assigned_to = req.query.assigned_to
-        if (req.query.created_by)  filter.created_by  = req.query.created_by
+        if (req.query.status)        filter.status          = req.query.status
+        if (req.query.priority)      filter.priority        = req.query.priority
+        if (req.query.department_id) filter['department.id'] = req.query.department_id
+        if (req.query.created_by)    filter.created_by      = req.query.created_by
 
         const tickets = await Ticket.find(filter).sort({ created_at: -1 })
         const payload = await Promise.all(tickets.map(populateTicket))
@@ -87,15 +117,31 @@ const getAllTickets = async (req, res) => {
     }
 }
 
-// ─── GET /tickets/mine ────────────────────────────────────────────────────────
+// ─── GET /tickets/mine  →  "Department Tickets" ────────────────────────────────
+//
+// Retourne les tickets dont department.id correspond à l'un des groupes Keycloak
+// du user connecté. Remplace la logique "assigned_to === userId".
 
 const getMyTickets = async (req, res) => {
     try {
-        const tickets = await Ticket.find({
-            assigned_to: req.keycloakUser.id,
-        }).sort({ created_at: -1 })
+        // Récupérer les groupes du user connecté
+        let userGroups = []
+        try {
+            userGroups = await getUserGroups(req.keycloakUser.id)
+        } catch (err) {
+            console.error('[getMyTickets] getUserGroups failed:', err.message)
+            // Si l'appel échoue, on retourne un tableau vide plutôt qu'une 500
+            return res.status(200).json({ count: 0, tickets: [] })
+        }
 
-        const payload = await Promise.all(tickets.map(populateTicket))
+        if (userGroups.length === 0) {
+            return res.status(200).json({ count: 0, tickets: [] })
+        }
+
+        const groupIds = userGroups.map(g => g.id)
+        const tickets  = await Ticket.find({ 'department.id': { $in: groupIds } }).sort({ created_at: -1 })
+        const payload  = await Promise.all(tickets.map(populateTicket))
+
         res.status(200).json({ count: payload.length, tickets: payload })
     } catch (error) {
         console.error('[getMyTickets]', error)
@@ -103,38 +149,61 @@ const getMyTickets = async (req, res) => {
     }
 }
 
-// ─── GET /tickets/stats ───────────────────────────────────────────────────────
+// ─── GET /tickets/stats ────────────────────────────────────────────────────────
 
 const getTicketStats = async (req, res) => {
     try {
         const canViewAll = hasPermission(req, 'VIEW_TICKETS')
-        const matchAll   = canViewAll ? {} : { assigned_to: req.keycloakUser.id }
-        const myFilter   = { assigned_to: req.keycloakUser.id }
 
-        const [byStatus, byPriority, myTickets, total] = await Promise.all([
-            Ticket.aggregate([{ $match: matchAll }, { $group: { _id: '$status',   count: { $sum: 1 } } }]),
-            Ticket.aggregate([{ $match: matchAll }, { $group: { _id: '$priority', count: { $sum: 1 } } }]),
-            Ticket.countDocuments(myFilter),
+        // Pour les stats "department", on récupère les groupes du user
+        let deptFilter = {}
+        let deptCount  = 0
+
+        if (!canViewAll) {
+            let userGroups = []
+            try { userGroups = await getUserGroups(req.keycloakUser.id) } catch (_) {}
+            const groupIds = userGroups.map(g => g.id)
+            deptFilter = { 'department.id': { $in: groupIds } }
+        }
+
+        const myGroupFilter = await (async () => {
+            try {
+                const g = await getUserGroups(req.keycloakUser.id)
+                return { 'department.id': { $in: g.map(x => x.id) } }
+            } catch (_) { return { 'department.id': { $in: [] } } }
+        })()
+
+        const matchAll = canViewAll ? {} : deptFilter
+
+        const [byStatus, byPriority, deptTickets, total] = await Promise.all([
+            Ticket.aggregate([{ $match: matchAll },      { $group: { _id: '$status',   count: { $sum: 1 } } }]),
+            Ticket.aggregate([{ $match: matchAll },      { $group: { _id: '$priority', count: { $sum: 1 } } }]),
+            Ticket.countDocuments(myGroupFilter),
             Ticket.countDocuments(matchAll),
         ])
 
-        res.status(200).json({ total, my_tickets: myTickets, by_status: byStatus, by_priority: byPriority })
+        res.status(200).json({
+            total,
+            my_tickets:  deptTickets,   // gardé pour compatibilité frontend (label renommé côté UI)
+            by_status:   byStatus,
+            by_priority: byPriority,
+        })
     } catch (error) {
         console.error('[getTicketStats]', error)
         res.status(500).json({ message: 'Server error.' })
     }
 }
 
-// ─── GET /tickets/:id ─────────────────────────────────────────────────────────
+// ─── GET /tickets/:id ──────────────────────────────────────────────────────────
 
 const getTicketById = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'VIEW_TICKETS')
         if (!allowed) return res.status(403).json({ message: 'Permission required: VIEW_TICKETS' })
 
-        if (!isValidObjectId(req.params.id)) {
+        if (!isValidObjectId(req.params.id))
             return res.status(400).json({ message: 'Invalid ticket ID format.' })
-        }
+
         const ticket = await Ticket.findById(req.params.id)
         if (!ticket) return res.status(404).json({ message: 'Ticket not found.' })
 
@@ -144,16 +213,16 @@ const getTicketById = async (req, res) => {
     }
 }
 
-// ─── GET /incidents/:id/tickets ───────────────────────────────────────────────
+// ─── GET /incidents/:id/tickets ────────────────────────────────────────────────
 
 const getTicketsByIncident = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'VIEW_TICKETS')
         if (!allowed) return res.status(403).json({ message: 'Permission required: VIEW_TICKETS' })
 
-        if (!isValidObjectId(req.params.id)) {
+        if (!isValidObjectId(req.params.id))
             return res.status(400).json({ message: 'Invalid incident ID format.' })
-        }
+
         const incident = await Incident.findById(req.params.id)
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
 
@@ -166,63 +235,73 @@ const getTicketsByIncident = async (req, res) => {
     }
 }
 
-// ─── POST /tickets ────────────────────────────────────────────────────────────
+// ─── POST /tickets ─────────────────────────────────────────────────────────────
 
 const createTicket = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'CREATE_TICKET')
         if (!allowed) return res.status(403).json({ message: 'Permission required: CREATE_TICKET' })
 
-        const { name, incident_id, assigned_to, priority, notes } = req.body
+        const { name, incident_id, department_id, department_name, priority, notes } = req.body
 
-        if (!name?.trim()) {
+        if (!name?.trim())
             return res.status(400).json({ message: 'name is required.' })
-        }
-        if (!incident_id || !assigned_to) {
-            return res.status(400).json({ message: 'incident_id and assigned_to are required.' })
-        }
-        if (!isValidObjectId(incident_id)) {
+
+        if (!incident_id || !department_id || !department_name)
+            return res.status(400).json({ message: 'incident_id, department_id and department_name are required.' })
+
+        if (!isValidObjectId(incident_id))
             return res.status(400).json({ message: 'Invalid incident_id format.' })
-        }
 
         const incident = await Incident.findById(incident_id)
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
 
+        // Valider que le groupe Keycloak existe réellement
         try {
-            await KeycloakAdmin.getUserById(assigned_to)
+            const groups = await getAllGroups()
+            const exists = groups.some(g => g.id === department_id)
+            if (!exists) return res.status(404).json({ message: 'Department (Keycloak group) not found.' })
         } catch (err) {
-            console.error('[createTicket] getUserById failed:', err.response?.status, err.response?.data || err.message)
-            return res.status(404).json({ message: 'Assigned user not found in Keycloak.' })
+            console.error('[createTicket] getGroups validation failed:', err.message)
+            // Non-bloquant si Keycloak est temporairement indisponible
         }
 
         const ticket = await new Ticket({
             name:        name.trim(),
             incident_id,
             created_by:  req.keycloakUser.id,
-            assigned_to,
-            priority:    priority || 'medium',
-            notes:       notes    || null,
-            status:      'open',
+            department: {
+                id:   department_id,
+                name: department_name,
+            },
+            priority: priority || 'medium',
+            notes:    notes    || null,
+            status:   'open',
         }).save()
 
         await logAction(req, {
             action:      'CREATE_TICKET',
             target_type: 'Ticket',
             target_id:   ticket._id,
-            metadata:    {
-                name:        ticket.name,
-                incident_id: String(incident_id),
-                assigned_to,
-                priority:    ticket.priority,
+            metadata: {
+                name:            ticket.name,
+                incident_id:     String(incident_id),
+                department_id,
+                department_name,
+                priority:        ticket.priority,
             },
         })
 
-        // Journal secondaire : ASSIGN_TICKET (acte d'affectation explicite à la création)
         await logAction(req, {
             action:      'ASSIGN_TICKET',
             target_type: 'Ticket',
             target_id:   ticket._id,
-            metadata:    { assigned_to, incident_id: String(incident_id), on_create: true },
+            metadata: {
+                department_id,
+                department_name,
+                incident_id: String(incident_id),
+                on_create:   true,
+            },
         })
 
         res.status(201).json({
@@ -235,67 +314,79 @@ const createTicket = async (req, res) => {
     }
 }
 
-// ─── PUT /tickets/:id ────────────────────────────────────────────────────────
+// ─── PUT /tickets/:id ──────────────────────────────────────────────────────────
 
 const updateTicket = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'UPDATE_TICKET')
         if (!allowed) return res.status(403).json({ message: 'Permission required: UPDATE_TICKET' })
 
-        if (!isValidObjectId(req.params.id)) {
+        if (!isValidObjectId(req.params.id))
             return res.status(400).json({ message: 'Invalid ticket ID format.' })
-        }
 
         const ticket = await Ticket.findById(req.params.id)
         if (!ticket) return res.status(404).json({ message: 'Ticket not found.' })
 
-        const allowed_fields = ['name', 'status', 'priority', 'notes', 'assigned_to']
         const updates = {}
-        allowed_fields.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
 
-        if (updates.assigned_to) {
+        // Champs scalaires autorisés
+        const SCALAR_FIELDS = ['name', 'status', 'priority', 'notes']
+        SCALAR_FIELDS.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
+
+        // Réassignation de département
+        if (req.body.department_id || req.body.department_name) {
+            const newId   = req.body.department_id   || ticket.department.id
+            const newName = req.body.department_name || ticket.department.name
+
+            // Valider le groupe
             try {
-                await KeycloakAdmin.getUserById(updates.assigned_to)
+                const groups = await getAllGroups()
+                const exists = groups.some(g => g.id === newId)
+                if (!exists) return res.status(404).json({ message: 'Department (Keycloak group) not found.' })
             } catch (err) {
-                console.error('[updateTicket] getUserById failed:', err.response?.status, err.response?.data || err.message)
-                return res.status(404).json({ message: 'Assigned user not found in Keycloak.' })
+                console.error('[updateTicket] getGroups validation failed:', err.message)
             }
+
+            updates['department.id']   = newId
+            updates['department.name'] = newName
         }
 
         const updated = await Ticket.findByIdAndUpdate(req.params.id, updates, { new: true })
 
-        // ── Journal UPDATE_TICKET (toujours) ──────────────────────────────────
+        // Journal UPDATE_TICKET
         await logAction(req, {
             action:      'UPDATE_TICKET',
             target_type: 'Ticket',
             target_id:   ticket._id,
-            metadata:    {
-                name:            ticket.name,
-                fields_updated:  Object.keys(updates),
-                incident_id:     String(ticket.incident_id),
+            metadata: {
+                name:           ticket.name,
+                fields_updated: Object.keys(updates),
+                incident_id:    String(ticket.incident_id),
             },
         })
 
-        // ── Journal ASSIGN_TICKET (si le champ assigned_to a changé) ─────────
-        if (updates.assigned_to && updates.assigned_to !== ticket.assigned_to) {
+        // Journal ASSIGN_TICKET si le département a changé
+        if (updates['department.id'] && updates['department.id'] !== ticket.department.id) {
             await logAction(req, {
                 action:      'ASSIGN_TICKET',
                 target_type: 'Ticket',
                 target_id:   ticket._id,
-                metadata:    {
-                    previous_assignee: ticket.assigned_to,
-                    new_assignee:      updates.assigned_to,
+                metadata: {
+                    previous_department_id:   ticket.department.id,
+                    previous_department_name: ticket.department.name,
+                    new_department_id:        updates['department.id'],
+                    new_department_name:      updates['department.name'],
                 },
             })
         }
 
-        // ── Journal CHANGE_TICKET_STATUS (si le statut a changé) ─────────────
+        // Journal CHANGE_TICKET_STATUS si le statut a changé
         if (updates.status && updates.status !== ticket.status) {
             await logAction(req, {
                 action:      'CHANGE_TICKET_STATUS',
                 target_type: 'Ticket',
                 target_id:   ticket._id,
-                metadata:    {
+                metadata: {
                     previous_status: ticket.status,
                     new_status:      updates.status,
                 },
@@ -309,16 +400,15 @@ const updateTicket = async (req, res) => {
     }
 }
 
-// ─── DELETE /tickets/:id ──────────────────────────────────────────────────────
+// ─── DELETE /tickets/:id ───────────────────────────────────────────────────────
 
 const deleteTicket = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'DELETE_TICKET')
         if (!allowed) return res.status(403).json({ message: 'Permission required: DELETE_TICKET' })
 
-        if (!isValidObjectId(req.params.id)) {
+        if (!isValidObjectId(req.params.id))
             return res.status(400).json({ message: 'Invalid ticket ID format.' })
-        }
 
         const ticket = await Ticket.findById(req.params.id)
         if (!ticket) return res.status(404).json({ message: 'Ticket not found.' })
@@ -329,12 +419,13 @@ const deleteTicket = async (req, res) => {
             action:      'DELETE_TICKET',
             target_type: 'Ticket',
             target_id:   ticket._id,
-            metadata:    {
-                name:        ticket.name,
-                status:      ticket.status,
-                priority:    ticket.priority,
-                incident_id: String(ticket.incident_id),
-                assigned_to: ticket.assigned_to,
+            metadata: {
+                name:            ticket.name,
+                status:          ticket.status,
+                priority:        ticket.priority,
+                incident_id:     String(ticket.incident_id),
+                department_id:   ticket.department.id,
+                department_name: ticket.department.name,
             },
         })
 
@@ -346,6 +437,7 @@ const deleteTicket = async (req, res) => {
 }
 
 module.exports = {
+    getDepartments,
     getAllTickets,
     getMyTickets,
     getTicketById,

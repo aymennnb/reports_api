@@ -31,6 +31,8 @@ app.use(cors({
     optionsSuccessStatus: 200,
 }))
 
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max:      200,
@@ -40,10 +42,30 @@ const globalLimiter = rateLimit({
 })
 app.use('/api', globalLimiter)
 
+// Limiter strict sur les routes d'authentification (brute-force protection)
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,  // 15 minutes
+    max:      20,               // 20 tentatives par fenêtre par IP
+    standardHeaders: true,
+    legacyHeaders:   false,
+    message: { message: 'Too many login attempts, please try again later.' },
+})
+
+// ── Body parsers ──────────────────────────────────────────────────────────────
+
 app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ extended: true }))
 
+// ── Routes ────────────────────────────────────────────────────────────────────
+
+// Auth — publique, AVANT /api et son authenticate middleware
+// Le authLimiter protège contre le brute-force sur /auth/login
+app.use('/api/auth', authLimiter, require('./routes/auth.routes'))
+
+// API — toutes les routes métier existantes (inchangées)
 app.use('/api', require('./routes/index'))
+
+// ── Utilitaires ───────────────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => res.json({
     status: 'ok',
@@ -63,6 +85,8 @@ app.use((err, req, res, next) => {
     res.status(500).json({ message: 'Internal server error.' })
 })
 
+// ── Démarrage ─────────────────────────────────────────────────────────────────
+
 const PORT = process.env.PORT || 5000
 
 mongoose
@@ -71,6 +95,7 @@ mongoose
         console.log('MongoDB connected')
         app.listen(PORT, () => {
             console.log(`Server running on port ${PORT}`)
+            console.log(`Auth endpoints: POST /auth/login | POST /auth/refresh | POST /auth/logout`)
             console.log(`Keycloak: ${process.env.KEYCLOAK_URL}/realms/${process.env.KEYCLOAK_REALM}`)
             console.log(`CORS allowed: ${ALLOWED_ORIGINS.join(', ')}`)
         })

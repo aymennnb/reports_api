@@ -4,6 +4,15 @@ const User = require('../models/User')
 const { KeycloakAdmin, getUserRealmRoles } = require('../services/keycloakAdmin')
 const { logAction } = require('../services/journalService')
 
+const ASSIGNABLE_PERMISSIONS = [
+    'VIEW_TICKETS', 'CREATE_TICKET','default-roles-reports_realm', 'UPDATE_TICKET', 'DELETE_TICKET',
+    'VIEW_VULNERABILITIES', 'VIEW_VULNERABILITY_DETAILS',
+    'CREATE_VULNERABILITY', 'UPDATE_VULNERABILITY', 'DELETE_VULNERABILITY',
+    'SYNC_VULNERABILITIES', 'LAUNCH_VULNERABILITY_SCAN',
+    'VIEW_INCIDENTS', 'CREATE_INCIDENT', 'UPDATE_INCIDENT', 'DELETE_INCIDENT',
+    'SYNC_INCIDENTS',
+]
+
 const getMyProfile = async (req, res) => {
     try {
         const { id: keycloak_id, username, email } = req.keycloakUser
@@ -243,8 +252,135 @@ const getUserPermissions = async (req, res) => {
     }
 }
 
+// ─── POST /users/:id/permissions/assign ───────────────────────────────────────
+const assignPermission = async (req, res) => {
+    try {
+        const roles = req.keycloakUser?.roles || []
+        if (!roles.includes('admin')) {
+            return res.status(403).json({ message: 'Admin role required.' })
+        }
+
+        const { id: userId } = req.params
+        const { permission }  = req.body
+
+        if (!permission) {
+            return res.status(400).json({ message: 'permission is required.' })
+        }
+        if (!ASSIGNABLE_PERMISSIONS.includes(permission)) {
+            return res.status(400).json({ message: `Unknown or non-assignable permission: ${permission}` })
+        }
+
+        await KeycloakAdmin.assignRealmRole(userId, permission)
+
+        await logAction(req, {
+            action:      'ASSIGN_PERMISSION',
+            target_type: 'User',
+            target_id:   userId,
+            metadata:    { permission },
+        })
+
+        return res.status(200).json({ message: `Permission ${permission} assigned.` })
+    } catch (err) {
+        const msg = err?.response?.data?.errorMessage || err.message
+        console.error('[assignPermission]', msg)
+        return res.status(500).json({ message: msg || 'Server error.' })
+    }
+}
+
+// ─── POST /users/:id/permissions/unassign ─────────────────────────────────────
+const unassignPermission = async (req, res) => {
+    try {
+        const roles = req.keycloakUser?.roles || []
+        if (!roles.includes('admin')) {
+            return res.status(403).json({ message: 'Admin role required.' })
+        }
+
+        const { id: userId } = req.params
+        const { permission }  = req.body
+
+        if (!permission) {
+            return res.status(400).json({ message: 'permission is required.' })
+        }
+
+        await KeycloakAdmin.removeRealmRole(userId, permission)
+
+        await logAction(req, {
+            action:      'UNASSIGN_PERMISSION',
+            target_type: 'User',
+            target_id:   userId,
+            metadata:    { permission },
+        })
+
+        return res.status(200).json({ message: `Permission ${permission} unassigned.` })
+    } catch (err) {
+        const msg = err?.response?.data?.errorMessage || err.message
+        console.error('[unassignPermission]', msg)
+        return res.status(500).json({ message: msg || 'Server error.' })
+    }
+}
+
+// ─── POST /users/:id/permissions/sync ─────────────────────────────────────────
+// Remplace TOUTES les permissions assignables du user par la liste fournie.
+const syncPermissions = async (req, res) => {
+    try {
+        const roles = req.keycloakUser?.roles || []
+        if (!roles.includes('admin')) {
+            return res.status(403).json({ message: 'Admin role required.' })
+        }
+
+        const { id: userId }    = req.params
+        const { permissions }   = req.body  // tableau attendu
+
+        if (!Array.isArray(permissions)) {
+            return res.status(400).json({ message: 'permissions must be an array.' })
+        }
+
+        // Valider chaque permission demandée
+        const invalid = permissions.filter(p => !ASSIGNABLE_PERMISSIONS.includes(p))
+        if (invalid.length > 0) {
+            return res.status(400).json({ message: `Unknown permissions: ${invalid.join(', ')}` })
+        }
+
+        // Récupérer les roles actuels du user
+        const currentRoles = await getUserRealmRoles(userId)
+
+        // Calculer diff — ne toucher QUE les ASSIGNABLE_PERMISSIONS
+        const currentAssignable = currentRoles.filter(r => ASSIGNABLE_PERMISSIONS.includes(r))
+        const toAdd    = permissions.filter(p => !currentAssignable.includes(p))
+        const toRemove = currentAssignable.filter(p => !permissions.includes(p))
+
+        await Promise.all([
+            ...toAdd.map(p    => KeycloakAdmin.assignRealmRole(userId, p)),
+            ...toRemove.map(p => KeycloakAdmin.removeRealmRole(userId, p)),
+        ])
+
+        await logAction(req, {
+            action:      'ASSIGN_PERMISSION',
+            target_type: 'User',
+            target_id:   userId,
+            metadata: {
+                sync:      true,
+                added:     toAdd,
+                removed:   toRemove,
+                final:     permissions,
+            },
+        })
+
+        return res.status(200).json({
+            message: 'Permissions synced.',
+            added:   toAdd,
+            removed: toRemove,
+            current: permissions,
+        })
+    } catch (err) {
+        const msg = err?.response?.data?.errorMessage || err.message
+        console.error('[syncPermissions]', msg)
+        return res.status(500).json({ message: msg || 'Server error.' })
+    }
+}
+
 module.exports = {
     getMyProfile, updateMyProfile,
     getUsers, getUserById, createUser, updateUser, deleteUser, setUserStatus,
-    getAllPermissions, getUserPermissions,
+    getAllPermissions, getUserPermissions,assignPermission, unassignPermission, syncPermissions
 }

@@ -86,6 +86,21 @@ const KeycloakAdmin = {
         const { data: role } = await client.get(`/roles/${roleName}`)
         await client.post(`/users/${userId}/role-mappings/realm`, [role])
     },
+    async removeRealmRole(userId, roleName) {
+        const client = await adminAxios()
+        const { data: role } = await client.get(`/roles/${roleName}`)
+        await client.delete(`/users/${userId}/role-mappings/realm`, { data: [role] })
+    },
+    async getGroups() {
+        const client = await adminAxios()
+        const { data } = await client.get('/groups?max=200')
+        return data
+    },
+    async getUserGroups(userId) {
+        const client = await adminAxios()
+        const { data } = await client.get(`/users/${userId}/groups`)
+        return data
+    },
 }
 
 module.exports = {KeycloakAdmin, getUserRealmRoles}

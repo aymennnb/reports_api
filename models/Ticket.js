@@ -15,13 +15,21 @@ const ticketSchema = new mongoose.Schema(
             required: true,
         },
         created_by: {
-            type: String,
+            type: String, // Keycloak user id
             required: true,
         },
-        assigned_to: {
-            type: String,
-            required: true,
+
+        department: {
+            id: {
+                type: String,
+                required: true,
+            },
+            name: {
+                type: String,
+                required: true,
+            },
         },
+
         status: {
             type: String,
             enum: ['open', 'in_progress', 'resolved', 'closed'],
@@ -41,5 +49,10 @@ const ticketSchema = new mongoose.Schema(
         timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
     }
 )
+
+ticketSchema.index({ 'department.id': 1 })
+ticketSchema.index({ status: 1 })
+ticketSchema.index({ priority: 1 })
+ticketSchema.index({ created_at: -1 })
 
 module.exports = mongoose.model('Ticket', ticketSchema)

@@ -13,18 +13,18 @@ const extractActor = (req) => ({
     username: req?.keycloakUser?.username || req?.user?.username || null,
 })
 
-const logAction = async (req, { action, target_type, target_id = null, metadata = {}, status = 'success', actor = null }) => {
+const logAction = async (req, { action, target_type, target_id = null, metadata = {}, status = 'success', actor = null, user_id, username, ip_address }) => {
     try {
-        const { user_id, username } = actor ?? extractActor(req)
+        const resolvedActor = actor ?? (user_id ? { user_id, username } : extractActor(req))
 
         await Journal.create({
-            user_id,
-            username,
+            user_id:    resolvedActor.user_id,
+            username:   resolvedActor.username ?? username ?? null,
             action,
             target_type,
             target_id:  target_id ? String(target_id) : null,
             metadata,
-            ip_address: extractIp(req),
+            ip_address: ip_address ?? extractIp(req),
             status,
         })
     } catch (err) {

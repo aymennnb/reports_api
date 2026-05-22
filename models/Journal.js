@@ -25,6 +25,12 @@ const ACTIONS = [
     'UPDATE_VULNERABILITY',
     'DELETE_VULNERABILITY',
     'SYNC_VULNERABILITIES',
+    'LOGIN_SUCCESS',
+    'LOGIN_FAILED',
+    'LOGOUT',
+
+     'ASSIGN_PERMISSION',
+     'UNASSIGN_PERMISSION',
 ]
 
 const TARGET_TYPES = [
@@ -33,6 +39,7 @@ const TARGET_TYPES = [
     'Ticket',
     'Vulnerability',
     'System',
+    'Authentication'
 ]
 
 const JournalSchema = new Schema(
