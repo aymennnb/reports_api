@@ -1,4 +1,3 @@
-// ── Helper : extraire les CVEs depuis ref_information ────────────────────────
 const extractCVEs = (pluginAttributes) => {
     const refs = pluginAttributes?.ref_information?.ref || [];
     const cveRef = refs.find(r => r.name === "cve");
@@ -7,7 +6,6 @@ const extractCVEs = (pluginAttributes) => {
 };
 
 
-// ── Helper : extraire le port depuis outputs[0].ports ────────────────────────
 const extractPort = (outputs) => {
     const firstOutput = outputs?.[0];
     if (!firstOutput?.ports) return null;
@@ -16,7 +14,6 @@ const extractPort = (outputs) => {
 };
 
 
-// ── Transformer un seul plugin (response3) en détails propres ────────────────
 const mapPluginDetails = (r3) => {
     if (!r3) return {};
 
@@ -37,9 +34,6 @@ const mapPluginDetails = (r3) => {
 };
 
 
-// ── Transformer un scan complet en payload pour syncFromNessus ────────────────
-// Input  : scanId (string), scanDetail (response2), pluginMap (map plugin_id → response3)
-// Output : payload prêt à être utilisé par vulnerabilityController.syncFromNessus()
 const buildSyncPayload = (scanId, scanDetail, pluginMap = {}) => {
 
     const hosts = (scanDetail.hosts || []).map(h => ({

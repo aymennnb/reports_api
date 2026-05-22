@@ -88,4 +88,4 @@ const KeycloakAdmin = {
     },
 }
 
-module.exports = {KeycloakAdmin,getUserRealmRoles}
+module.exports = {KeycloakAdmin, getUserRealmRoles}

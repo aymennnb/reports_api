@@ -2,26 +2,14 @@ const ImportLog    = require("../models/ImportLog");
 const { autoSyncNessus } = require("../services/nessusAutoSync");
 const { autoSyncWazuh  } = require("../services/wazuhAutoSync");
 
-/**
- * importLogsController.js
- *
- * Expose des routes pour :
- *   1. Consulter l'historique des imports (GET /api/import-logs)
- *   2. Voir le détail d'un log (GET /api/import-logs/:id)
- *   3. Déclencher manuellement un import (POST /api/import-logs/trigger/:source)
- *      → utile si tu veux garder le bouton manuel sur le frontend
- *         tout en profitant du même système de logs que le scheduler
- */
 
-// ─── GET /api/import-logs ─────────────────────────────────────────────────────
 const getLogs = async (req, res) => {
     try {
         const filter = {};
-        if (req.query.source)  filter.source  = req.query.source;  // "nessus" | "wazuh"
-        if (req.query.status)  filter.status  = req.query.status;  // "success" | "error" | "partial"
-        if (req.query.trigger) filter.trigger = req.query.trigger; // "scheduler" | "manual"
+        if (req.query.source)  filter.source  = req.query.source;
+        if (req.query.status)  filter.status  = req.query.status;
+        if (req.query.trigger) filter.trigger = req.query.trigger;
 
-        // Filtrage par date
         if (req.query.from || req.query.to) {
             filter.started_at = {};
             if (req.query.from) filter.started_at.$gte = new Date(req.query.from);
@@ -37,7 +25,7 @@ const getLogs = async (req, res) => {
                 .sort({ started_at: -1 })
                 .skip(skip)
                 .limit(limit)
-                .select("-logs"), // On exclut le détail des logs pour la liste
+                .select("-logs"),
             ImportLog.countDocuments(filter),
         ]);
 
@@ -53,8 +41,6 @@ const getLogs = async (req, res) => {
     }
 };
 
-// ─── GET /api/import-logs/:id ─────────────────────────────────────────────────
-// Retourne le détail complet avec tous les messages de log
 const getLogById = async (req, res) => {
     try {
         const log = await ImportLog.findById(req.params.id);
@@ -65,8 +51,6 @@ const getLogById = async (req, res) => {
     }
 };
 
-// ─── GET /api/import-logs/stats ───────────────────────────────────────────────
-// Vue synthétique : dernier import de chaque source + compteurs globaux
 const getLogStats = async (req, res) => {
     try {
         const [lastNessus, lastWazuh, totalByStatus, totalBySource] = await Promise.all([
@@ -97,9 +81,6 @@ const getLogStats = async (req, res) => {
     }
 };
 
-// ─── POST /api/import-logs/trigger/:source ────────────────────────────────────
-// Déclenche un import manuel (remplace les anciens boutons du frontend).
-// Utilise les mêmes services que le scheduler → logs en base également.
 const triggerManualImport = async (req, res) => {
     const { source } = req.params;
 

@@ -2,8 +2,7 @@
 
 const Incident = require('../models/Incident')
 const { syncWazuhIncidents } = require('../services/wazuhIncidentService')
-
-// ─── Helpers permissions Keycloak ────────────────────────────────────────────
+const { logAction } = require('../services/journalService')
 
 const getRoles = (req) => req.keycloakUser?.roles || req.user?.roles || []
 
@@ -92,7 +91,7 @@ const createIncident = async (req, res) => {
             return res.status(400).json({ message: 'title, description and severity are required.' })
         }
 
-        await new Incident({
+        const incident = await new Incident({
             title, description,
             severity:   parseInt(severity),
             agent_name: agent_name  || 'unknown',
@@ -101,6 +100,25 @@ const createIncident = async (req, res) => {
             source:     'manual',
             status:     'open',
         }).save()
+
+        try {
+            await logAction(req, {
+                action:      'CREATE_INCIDENT',
+                target_type: 'Incident',
+                target_id:   incident._id,
+                metadata:    {
+                    title:       incident.title,
+                    severity:    incident.severity,
+                    agent_name:  incident.agent_name,
+                    source:      incident.source,
+                    rule_id:     incident.rule_id,
+                    rule_level:  incident.rule_level,
+                    status:      incident.status,
+                },
+            })
+        } catch (logError) {
+            console.error('[createIncident] logAction failed:', logError?.message || logError)
+        }
 
         res.status(201).json({ message: 'Incident created successfully.' })
     } catch (error) {
@@ -115,6 +133,22 @@ const updateIncident = async (req, res) => {
         const incident = await Incident.findById(req.params.id)
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
         const updated = await Incident.findByIdAndUpdate(req.params.id, req.body, { new: true })
+
+        try {
+            await logAction(req, {
+                action:      'UPDATE_INCIDENT',
+                target_type: 'Incident',
+                target_id:   incident._id,
+                metadata:    {
+                    title:   incident.title,
+                    source:  incident.source,
+                    changes: Object.keys(req.body),
+                },
+            })
+        } catch (logError) {
+            console.error('[updateIncident] logAction failed:', logError?.message || logError)
+        }
+
         res.status(200).json({ message: 'Incident updated successfully.', incident: updated })
     } catch (error) {
         res.status(500).json({ message: 'Server error.' })
@@ -128,6 +162,25 @@ const deleteIncident = async (req, res) => {
         const incident = await Incident.findById(req.params.id)
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
         await Incident.findByIdAndDelete(req.params.id)
+
+        try {
+            await logAction(req, {
+                action:      'DELETE_INCIDENT',
+                target_type: 'Incident',
+                target_id:   incident._id,
+                metadata:    {
+                    title:      incident.title,
+                    severity:   incident.severity,
+                    agent_name: incident.agent_name,
+                    source:     incident.source,
+                    status:     incident.status,
+                    rule_id:    incident.rule_id || null,
+                },
+            })
+        } catch (logError) {
+            console.error('[deleteIncident] logAction failed:', logError?.message || logError)
+        }
+
         res.status(200).json({ message: 'Incident deleted successfully.' })
     } catch (error) {
         res.status(500).json({ message: 'Server error.' })
@@ -139,12 +192,42 @@ const syncFromWazuh = async (req, res) => {
         const allowed = canSync(req)
         if (!allowed) return res.status(403).json({ message: 'Permission required: SYNC_INCIDENTS' })
         const result = await syncWazuhIncidents()
+
+        try {
+            await logAction(req, {
+                action:      'SYNC_INCIDENTS',
+                target_type: 'Incident',
+                target_id:   'wazuh',
+                metadata:    {
+                    created: result.created,
+                    skipped: result.skipped,
+                },
+            })
+        } catch (logError) {
+            console.error('[syncFromWazuh] logAction failed:', logError?.message || logError)
+        }
+
         res.status(200).json({
             message: `Sync completed: ${result.created} created, ${result.skipped} skipped`,
             data: result,
         })
     } catch (error) {
         console.error('[syncFromWazuh]', error.message)
+
+        try {
+            await logAction(req, {
+                action:      'SYNC_INCIDENTS',
+                target_type: 'Incident',
+                target_id:   'wazuh',
+                metadata:    {
+                    error: error.message,
+                },
+                status: 'failure',
+            })
+        } catch (logError) {
+            console.error('[syncFromWazuh] logAction failed:', logError?.message || logError)
+        }
+
         res.status(500).json({ message: 'Sync failed (Check server logs).' })
     }
 }

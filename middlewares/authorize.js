@@ -1,31 +1,5 @@
-// middlewares/authorize.js
-// ─────────────────────────────────────────────────────────────────────────────
-// Middlewares d'autorisation RBAC basés sur les rôles Keycloak.
-// À utiliser APRÈS authenticate().
-//
-// USAGE dans les routes :
-//
-//   router.delete('/incidents/:id',
-//     authenticate,
-//     requireRole('admin'),           // admin seulement
-//     deleteIncident
-//   )
-//
-//   router.post('/incidents/sync',
-//     authenticate,
-//     requireAnyRole('admin', 'soc'), // admin OU soc
-//     syncFromWazuh
-//   )
-//
-//   router.get('/vulnerabilities',
-//     authenticate,                   // authentifié seulement (rôle vérifié dans le controller)
-//     getVulnerabilities
-//   )
-// ─────────────────────────────────────────────────────────────────────────────
 'use strict'
 
-// ─── requireRole(role) ───────────────────────────────────────────────────────
-// L'utilisateur DOIT avoir exactement ce rôle.
 const requireRole = (role) => (req, res, next) => {
     const user = req.keycloakUser || req.user
     if (!user) {
@@ -44,8 +18,6 @@ const requireRole = (role) => (req, res, next) => {
     next()
 }
 
-// ─── requireAnyRole(...roles) ────────────────────────────────────────────────
-// L'utilisateur doit avoir AU MOINS UN des rôles listés (logique OR).
 const requireAnyRole = (...roles) => (req, res, next) => {
     const user = req.keycloakUser || req.user
     if (!user) {
@@ -66,8 +38,6 @@ const requireAnyRole = (...roles) => (req, res, next) => {
     next()
 }
 
-// ─── requireAllRoles(...roles) ───────────────────────────────────────────────
-// L'utilisateur doit avoir TOUS les rôles listés (logique AND, cas rare).
 const requireAllRoles = (...roles) => (req, res, next) => {
     const user = req.keycloakUser || req.user
     if (!user) {
@@ -87,8 +57,6 @@ const requireAllRoles = (...roles) => (req, res, next) => {
     next()
 }
 
-// ─── isAdmin (helper booléen, utilisable dans les controllers) ───────────────
-// Usage dans un controller : if (isAdmin(req)) { ... }
 const isAdmin = (req) => {
     const user = req.keycloakUser || req.user
     const roles = user?.roles || (user?.role ? [user.role] : [])

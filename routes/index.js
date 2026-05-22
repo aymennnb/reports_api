@@ -15,7 +15,7 @@ const {
 const {
     getVulnerabilities, getVulnerabilityById, getStats: getVulnStats,
     createVulnerability, updateVulnerability, deleteVulnerability,
-    syncFromNessusById, getScansGroupedByFolder,
+    syncFromNessusById, getScansGroupedByFolder, getTemplates, launchNessusScan
 } = require('../controllers/vulnerabilityController')
 
 const {
@@ -26,6 +26,13 @@ const {
 const {
     getLogs, getLogById, getLogStats, triggerManualImport,
 } = require('../controllers/importLogsController')
+
+const {
+    getAllTickets, getMyTickets, getTicketById, getTicketsByIncident,
+    createTicket, updateTicket, deleteTicket, getTicketStats,
+} = require('../controllers/ticketController')
+
+const { getAllJournals } = require('../controllers/journalController')
 
 router.get('/users/me',    authenticate, getMyProfile)
 router.put('/users/me',    authenticate, updateMyProfile)
@@ -52,6 +59,9 @@ router.delete('/vulnerabilities/:id',   authenticate, deleteVulnerability)
 router.get('/scans',                                   authenticate, getScansGroupedByFolder)
 router.post('/vulnerabilities/sync/nessus/:scanId',    authenticate, syncFromNessusById)
 
+router.get('/nessus/templates', authenticate, getTemplates)
+router.post('/vulnerabilities/nessus/launch-scan', authenticate, launchNessusScan)
+
 router.get('/incidents/stats',    authenticate, getIncidentStats)
 router.get('/incidents',          authenticate, getAllIncidents)
 router.get('/incidents/:id',      authenticate, getIncidentById)
@@ -61,9 +71,20 @@ router.post('/incidents',         authenticate, createIncident)
 router.delete('/incidents/:id',   authenticate, deleteIncident)
 router.post('/incidents/sync',    authenticate, syncFromWazuh)
 
+router.get('/tickets/stats',              authenticate, getTicketStats)
+router.get('/tickets/mine',               authenticate, getMyTickets)
+router.get('/tickets',                    authenticate, getAllTickets)
+router.get('/tickets/:id',                authenticate, getTicketById)
+router.post('/tickets',                   authenticate, createTicket)
+router.put('/tickets/:id',                authenticate, updateTicket)
+router.delete('/tickets/:id',             authenticate, requireAnyRole('admin'), deleteTicket)
+router.get('/incidents/:id/tickets',      authenticate, getTicketsByIncident)
+
 router.get('/import-logs/stats',           authenticate, requireAnyRole('admin'), getLogStats)
 router.get('/import-logs',                 authenticate, requireAnyRole('admin'), getLogs)
 router.get('/import-logs/:id',             authenticate, requireAnyRole('admin'), getLogById)
 router.post('/import-logs/trigger/:source', authenticate, requireAnyRole('admin'), triggerManualImport)
+
+router.get('/journals', authenticate, requireAnyRole('admin'), getAllJournals)
 
 module.exports = router
