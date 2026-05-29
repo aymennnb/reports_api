@@ -1,12 +1,34 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose')
 
 const userSchema = new mongoose.Schema({
-    username: {type: String, required: true, unique: true, trim: true},
-    password: {type: String, required: true},
-    is_active: {type: Boolean, default: true},
-    role: {type: String, enum: ["admin", "user"], default: "user"},
-    login_attempts: {type: Number, default: 0},
-    created_at: {type: Date, default: Date.now}
-});
+    keycloak_id: {
+        type:     String,
+        required: true,
+        unique:   true,
+        index:    true,
+    },
+    username: {
+        type:     String,
+        required: true,
+        unique:   true,
+        trim:     true,
+    },
+    email: {
+        type:      String,
+        trim:      true,
+        lowercase: true,
+        default:   null,
+    },
+    department:  { type: String,  default: null },
+    avatar_url:  { type: String,  default: null },
+    preferences: { type: mongoose.Schema.Types.Mixed, default: {} },
+    created_at:  { type: Date, default: Date.now },
+    updated_at:  { type: Date, default: Date.now },
+})
 
-module.exports = mongoose.model("User", userSchema);
+userSchema.pre('save', function (next) {
+    this.updated_at = new Date()
+    next()
+})
+
+module.exports = mongoose.model('User', userSchema)

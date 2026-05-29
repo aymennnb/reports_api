@@ -1,277 +1,386 @@
-const User = require("../models/User");
-const { Permission, RolePermission } = require("../models/Permission");
-const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
+'use strict'
 
-//  AUTHENTIFICATION ════════════════════════════════════════════════════════════════
-// POST /api/auth/login
-const loginUser = async (req, res) => {
+const User = require('../models/User')
+const { KeycloakAdmin, getUserRealmRoles } = require('../services/keycloakAdmin')
+const { logAction } = require('../services/journalService')
+
+const ASSIGNABLE_PERMISSIONS = [
+    'VIEW_TICKETS', 'CREATE_TICKET','default-roles-reports_realm', 'UPDATE_TICKET', 'DELETE_TICKET',
+    'VIEW_VULNERABILITIES', 'VIEW_VULNERABILITY_DETAILS',
+    'CREATE_VULNERABILITY', 'UPDATE_VULNERABILITY', 'DELETE_VULNERABILITY',
+    'SYNC_VULNERABILITIES', 'LAUNCH_VULNERABILITY_SCAN',
+    'VIEW_INCIDENTS', 'CREATE_INCIDENT', 'UPDATE_INCIDENT', 'DELETE_INCIDENT',
+    'SYNC_INCIDENTS',
+]
+
+const getMyProfile = async (req, res) => {
     try {
-        const { username, password } = req.body;
-        if (!username || !password) {
-            return res.status(400).json({ message: "Username and password are required." });
-        }
+        const { id: keycloak_id, username, email } = req.keycloakUser
 
-        const user = await User.findOne({ username });
+        const user = await User.findOneAndUpdate(
+            { keycloak_id },
+            { $setOnInsert: { keycloak_id, username, email } },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        )
 
-        if (!user) {
-            return res.status(401).json({ message: "Invalid credentials." });
-        }
-
-        if (!user.is_active) {
-            return res.status(403).json({ message: "Account is disabled (Contact an administrator)." });
-        }
-
-        const validPassword = await bcrypt.compare(password, user.password);
-
-        if (!validPassword) {
-            user.login_attempts += 1;
-
-            if (user.role === "user" && user.login_attempts >= 3) {
-                user.is_active = false;
-                await user.save();
-                return res.status(403).json({ message: "Account blocked after 3 failed attempts (Contact an administrator)." });
-            }
-
-            await user.save();
-            return res.status(401).json({ message: "Invalid credentials." });
-        }
-
-        user.login_attempts = 0;
-        await user.save();
-
-        const token = jwt.sign(
-            { id: user._id, username: user.username, role: user.role },
-            process.env.JWT_SECRET,
-            { expiresIn: "1h" }
-        );
-
-        res.status(200).json({ message: "Login successful.", token });
-
+        res.status(200).json({
+            keycloak_id: user.keycloak_id,
+            username:    user.username,
+            email:       user.email,
+            roles:       req.keycloakUser.roles,
+            department:  user.department,
+            preferences: user.preferences,
+            created_at:  user.created_at,
+        })
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        console.error(error)
+        res.status(500).json({ message: 'Server error.' })
     }
-};
+}
 
-// GESTION DES UTILISATEURS ════════════════════════════════════════════════════════════════
-// POST /api/users (ADMIN seulement)
-const createUser = async (req, res) => {
+const updateMyProfile = async (req, res) => {
     try {
-        const { username, password, role } = req.body;
+        const { id: keycloak_id } = req.keycloakUser
+        const allowed = ['department', 'avatar_url', 'preferences']
+        const updates = {}
+        allowed.forEach(field => {
+            if (req.body[field] !== undefined) updates[field] = req.body[field]
+        })
 
-        if (!username || !password) {
-            return res.status(400).json({ message: "Username and password are required." });
-        }
+        const updatedUser = await User.findOneAndUpdate(
+            { keycloak_id },
+            { $set: { ...updates, updated_at: new Date() } },
+            { new: true }
+        )
 
-        const existing = await User.findOne({ username });
-        if (existing) {
-            return res.status(400).json({ message: "Username already exists." });
-        }
+        if (!updatedUser) return res.status(404).json({ message: 'User not found in local DB.' })
 
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const newUser = new User({username, password: hashedPassword, role: role});
-        await newUser.save();
+        await logAction(req, {
+            action:      'UPDATE_USER',
+            target_type: 'User',
+            target_id:   keycloak_id,
+            metadata:    { self_update: true, fields_updated: Object.keys(updates) },
+        })
 
-        res.status(201).json({ message: "User created successfully." });
-
+        res.status(200).json({ message: 'Profile updated.', user: updatedUser })
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        res.status(500).json({ message: 'Server error.' })
     }
-};
+}
 
-// GET /api/users (utilisateurs authentifié)
 const getUsers = async (req, res) => {
     try {
-        const users = await User.find({ _id: { $ne: req.user.id } })
-            .select("-password -login_attempts")
-            .sort({ created_at: -1 });
-
-        res.status(200).json(users);
+        const users = await KeycloakAdmin.getUsers()
+        res.status(200).json(users)
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        console.error(error)
+        res.status(500).json({ message: 'Failed to fetch users from Keycloak.' })
     }
-};
+}
 
-// GET /api/users/:id (utilisateur par ID authentifié)
 const getUserById = async (req, res) => {
     try {
-        const user = await User.findById(req.params.id).select("-password -login_attempts");
+        const user = await KeycloakAdmin.getUserById(req.params.id)
+        if (!user) return res.status(404).json({ message: 'User not found.' })
+        res.status(200).json(user)
+    } catch (error) {
+        res.status(500).json({ message: 'Server error.' })
+    }
+}
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found." });
+const createUser = async (req, res) => {
+    try {
+        const { username, email, password, role, firstName, lastName } = req.body
+
+        if (!username || !password) {
+            return res.status(400).json({ message: 'Username and password are required.' })
         }
 
-        res.status(200).json(user);
+        let kcUser
+        try {
+            kcUser = await KeycloakAdmin.createUser({ username, email, firstName, lastName, password })
+        } catch (createError) {
+            const kcStatus  = createError?.response?.status
+            const kcMessage = createError?.response?.data?.errorMessage
+                           || createError?.response?.data?.error_description
+                           || createError?.response?.data?.error
+                           || createError?.message
+
+            if (kcStatus === 409) {
+                return res.status(409).json({ message: 'A user with this username or email already exists.' })
+            }
+
+            console.error('[createUser] Keycloak user creation failed:', kcMessage)
+            return res.status(500).json({ message: kcMessage || 'Failed to create user in Keycloak.' })
+        }
+
+        if (role) {
+            try {
+                await KeycloakAdmin.assignRealmRole(kcUser.id, role)
+
+                await logAction(req, {
+                    action:      'ASSIGN_ROLE',
+                    target_type: 'User',
+                    target_id:   kcUser.id,
+                    metadata:    { username, role },
+                })
+            } catch (roleError) {
+                const kcMessage = roleError?.response?.data?.errorMessage || roleError?.message
+                console.error(`[createUser] Role assignment failed for user ${kcUser.id}:`, kcMessage)
+
+                await logAction(req, {
+                    action:      'CREATE_USER',
+                    target_type: 'User',
+                    target_id:   kcUser.id,
+                    metadata:    { username, email, firstName, lastName, role_requested: role },
+                })
+
+                return res.status(201).json({
+                    message: `User created but role assignment failed: ${kcMessage || 'unknown error'}. You can assign the role manually.`,
+                    id:      kcUser.id,
+                    warning: true,
+                })
+            }
+        }
+
+        await logAction(req, {
+            action:      'CREATE_USER',
+            target_type: 'User',
+            target_id:   kcUser.id,
+            metadata:    { username, email, firstName, lastName, role: role || null },
+        })
+
+        return res.status(201).json({ message: 'User created successfully.', id: kcUser.id })
 
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        console.error('[createUser] Unexpected error:', error)
+        const msg = error?.response?.data?.errorMessage || error?.message || 'Server error.'
+        return res.status(500).json({ message: msg })
     }
-};
+}
 
-// PUT /api/users/:id (Modifier un utilisateur) - ADMIN seulement
 const updateUser = async (req, res) => {
     try {
-        const user = await User.findById(req.params.id);
+        await KeycloakAdmin.updateUser(req.params.id, req.body)
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found." });
-        }
+        await logAction(req, {
+            action:      'UPDATE_USER',
+            target_type: 'User',
+            target_id:   req.params.id,
+            metadata:    { fields_updated: Object.keys(req.body) },
+        })
 
-        if (req.body.password) {
-            req.body.password = await bcrypt.hash(req.body.password, 10);
-        }
-
-        const updatedUser = await User.findByIdAndUpdate(
-            req.params.id,
-            req.body,
-            { new: true }
-        ).select("-password -login_attempts");
-
-        res.status(200).json({ message: "User updated successfully.", user: updatedUser });
-
+        res.status(200).json({ message: 'User updated in Keycloak.' })
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        res.status(500).json({ message: 'Server error.' })
     }
-};
+}
 
-// DELETE /api/users/:id (Supprimer un utilisateur) - ADMIN seulement
 const deleteUser = async (req, res) => {
     try {
-        const user = await User.findById(req.params.id);
+        let deletedUserInfo = null
+        try {
+            deletedUserInfo = await KeycloakAdmin.getUserById(req.params.id)
+        } catch (_) {}
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found." });
-        }
+        await KeycloakAdmin.deleteUser(req.params.id)
+        await User.findOneAndDelete({ keycloak_id: req.params.id })
 
-        await User.findByIdAndDelete(req.params.id);
+        await logAction(req, {
+            action:      'DELETE_USER',
+            target_type: 'User',
+            target_id:   req.params.id,
+            metadata:    {
+                username: deletedUserInfo?.username || null,
+                email:    deletedUserInfo?.email    || null,
+            },
+        })
 
-        res.status(200).json({ message: "User deleted successfully." });
-
+        res.status(200).json({ message: 'User deleted.' })
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        res.status(500).json({ message: 'Server error.' })
     }
-};
+}
 
-// PUT /api/users/:id/activate (Réactiver un compte bloqué) — ADMIN seulement
-const activateUser = async (req, res) => {
+const setUserStatus = (enabled) => async (req, res) => {
     try {
-        const user = await User.findById(req.params.id);
+        await KeycloakAdmin.updateUser(req.params.id, { enabled })
 
-        if (!user) {
-            return res.status(404).json({ message: "User not found." });
-        }
+        await logAction(req, {
+            action:      enabled ? 'ACTIVATE_USER' : 'DEACTIVATE_USER',
+            target_type: 'User',
+            target_id:   req.params.id,
+            metadata:    { enabled },
+        })
 
-        user.is_active = true;
-        user.login_attempts = 0;
-        await user.save();
-
-        res.status(200).json({ message: "User account reactivated successfully." });
-
+        res.status(200).json({ message: `User ${enabled ? 'activated' : 'deactivated'}.` })
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        res.status(500).json({ message: 'Server error.' })
     }
-};
+}
 
-
-//  GESTION DES PERMISSIONS ════════════════════════════════════════════════════════════════
-// GET /api/permissions
 const getAllPermissions = async (req, res) => {
     try {
-        const permissions = await Permission.find().sort({ permission_id: 1 });
-        res.status(200).json({ permissions });
+        res.status(200).json({ permissions: req.keycloakUser.roles })
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        res.status(500).json({ message: 'Server error.' })
     }
-};
+}
 
-// POST /api/users/:id/permissions (Assigner une permission) — ADMIN seulement
-const assignPermission = async (req, res) => {
-    try {
-        const { permission_id } = req.body;
-        const user_id = req.params.id;
-
-        if (!permission_id) {
-            return res.status(400).json({ message: "permission_id is required." });
-        }
-
-        const user = await User.findById(user_id);
-        if (!user) {
-            return res.status(404).json({ message: "User not found." });
-        }
-
-        // Vérifier que la permission existe
-        const permission = await Permission.findOne({ permission_id });
-        if (!permission) {
-            return res.status(404).json({ message: "Permission not found." });
-        }
-
-        // Vérifier que la permission n'est pas déjà assignée
-        const alreadyAssigned = await RolePermission.findOne({ user_id, permission_id });
-        if (alreadyAssigned) {
-            return res.status(400).json({ message: "Permission already assigned to this user." });
-        }
-
-        await new RolePermission({ user_id, permission_id }).save();
-
-        res.status(201).json({ message: "Permission assigned successfully." });
-
-    } catch (error) {
-        res.status(500).json({ message: "Server error." });
-    }
-};
-
-// DELETE /api/users/:id/permissions/:permission_id (Retirer une permission) — ADMIN seulement
-const removePermission = async (req, res) => {
-    try {
-        const user_id = req.params.id;
-        const permission_id = parseInt(req.params.permission_id);
-
-        const entry = await RolePermission.findOneAndDelete({ user_id, permission_id });
-
-        if (!entry) {
-            return res.status(404).json({ message: "Permission not found for this user." });
-        }
-
-        res.status(200).json({ message: "Permission removed successfully." });
-
-    } catch (error) {
-        res.status(500).json({ message: "Server error." });
-    }
-};
-
-// GET /api/users/:id/permissions (Voir les permissions d'un user) (authentifié)
 const getUserPermissions = async (req, res) => {
     try {
-        const user_id = req.params.id;
+        const requestedId = req.params.id
+        const currentId   = req.keycloakUser.id
+        const roles       = req.keycloakUser.roles || []
 
-        // Récupérer toutes les permissions assignées au user
-        const rolePermissions = await RolePermission.find({ user_id });
-
-        if (rolePermissions.length === 0) {
-            return res.status(200).json({ permissions: [] });
+        if (requestedId === currentId) {
+            return res.status(200).json({ permissions: roles })
         }
 
-        // Récupérer les détails de chaque permission
-        const permissionIds = rolePermissions.map(rp => rp.permission_id);
-        const permissions = await Permission.find({ permission_id: { $in: permissionIds } });
+        if (!roles.includes('admin')) {
+            return res.status(403).json({ message: 'Access denied.' })
+        }
 
-        res.status(200).json({ permissions });
+        if (typeof getUserRealmRoles !== 'function') {
+            return res.status(501).json({ message: 'getUserRealmRoles not implemented.' })
+        }
 
+        const userRoles = await getUserRealmRoles(requestedId)
+        res.status(200).json({ permissions: userRoles })
     } catch (error) {
-        res.status(500).json({ message: "Server error." });
+        res.status(500).json({ message: 'Server error.' })
     }
-};
+}
+
+// ─── POST /users/:id/permissions/assign ───────────────────────────────────────
+const assignPermission = async (req, res) => {
+    try {
+        const roles = req.keycloakUser?.roles || []
+        if (!roles.includes('admin')) {
+            return res.status(403).json({ message: 'Admin role required.' })
+        }
+
+        const { id: userId } = req.params
+        const { permission }  = req.body
+
+        if (!permission) {
+            return res.status(400).json({ message: 'permission is required.' })
+        }
+        if (!ASSIGNABLE_PERMISSIONS.includes(permission)) {
+            return res.status(400).json({ message: `Unknown or non-assignable permission: ${permission}` })
+        }
+
+        await KeycloakAdmin.assignRealmRole(userId, permission)
+
+        await logAction(req, {
+            action:      'ASSIGN_PERMISSION',
+            target_type: 'User',
+            target_id:   userId,
+            metadata:    { permission },
+        })
+
+        return res.status(200).json({ message: `Permission ${permission} assigned.` })
+    } catch (err) {
+        const msg = err?.response?.data?.errorMessage || err.message
+        console.error('[assignPermission]', msg)
+        return res.status(500).json({ message: msg || 'Server error.' })
+    }
+}
+
+// ─── POST /users/:id/permissions/unassign ─────────────────────────────────────
+const unassignPermission = async (req, res) => {
+    try {
+        const roles = req.keycloakUser?.roles || []
+        if (!roles.includes('admin')) {
+            return res.status(403).json({ message: 'Admin role required.' })
+        }
+
+        const { id: userId } = req.params
+        const { permission }  = req.body
+
+        if (!permission) {
+            return res.status(400).json({ message: 'permission is required.' })
+        }
+
+        await KeycloakAdmin.removeRealmRole(userId, permission)
+
+        await logAction(req, {
+            action:      'UNASSIGN_PERMISSION',
+            target_type: 'User',
+            target_id:   userId,
+            metadata:    { permission },
+        })
+
+        return res.status(200).json({ message: `Permission ${permission} unassigned.` })
+    } catch (err) {
+        const msg = err?.response?.data?.errorMessage || err.message
+        console.error('[unassignPermission]', msg)
+        return res.status(500).json({ message: msg || 'Server error.' })
+    }
+}
+
+// ─── POST /users/:id/permissions/sync ─────────────────────────────────────────
+// Remplace TOUTES les permissions assignables du user par la liste fournie.
+const syncPermissions = async (req, res) => {
+    try {
+        const roles = req.keycloakUser?.roles || []
+        if (!roles.includes('admin')) {
+            return res.status(403).json({ message: 'Admin role required.' })
+        }
+
+        const { id: userId }    = req.params
+        const { permissions }   = req.body  // tableau attendu
+
+        if (!Array.isArray(permissions)) {
+            return res.status(400).json({ message: 'permissions must be an array.' })
+        }
+
+        // Valider chaque permission demandée
+        const invalid = permissions.filter(p => !ASSIGNABLE_PERMISSIONS.includes(p))
+        if (invalid.length > 0) {
+            return res.status(400).json({ message: `Unknown permissions: ${invalid.join(', ')}` })
+        }
+
+        // Récupérer les roles actuels du user
+        const currentRoles = await getUserRealmRoles(userId)
+
+        // Calculer diff — ne toucher QUE les ASSIGNABLE_PERMISSIONS
+        const currentAssignable = currentRoles.filter(r => ASSIGNABLE_PERMISSIONS.includes(r))
+        const toAdd    = permissions.filter(p => !currentAssignable.includes(p))
+        const toRemove = currentAssignable.filter(p => !permissions.includes(p))
+
+        await Promise.all([
+            ...toAdd.map(p    => KeycloakAdmin.assignRealmRole(userId, p)),
+            ...toRemove.map(p => KeycloakAdmin.removeRealmRole(userId, p)),
+        ])
+
+        await logAction(req, {
+            action:      'ASSIGN_PERMISSION',
+            target_type: 'User',
+            target_id:   userId,
+            metadata: {
+                sync:      true,
+                added:     toAdd,
+                removed:   toRemove,
+                final:     permissions,
+            },
+        })
+
+        return res.status(200).json({
+            message: 'Permissions synced.',
+            added:   toAdd,
+            removed: toRemove,
+            current: permissions,
+        })
+    } catch (err) {
+        const msg = err?.response?.data?.errorMessage || err.message
+        console.error('[syncPermissions]', msg)
+        return res.status(500).json({ message: msg || 'Server error.' })
+    }
+}
 
 module.exports = {
-    loginUser,
-    createUser,
-    getUsers,
-    getUserById,
-    updateUser,
-    deleteUser,
-    activateUser,
-    assignPermission,
-    removePermission,
-    getUserPermissions,
-    getAllPermissions
-};
+    getMyProfile, updateMyProfile,
+    getUsers, getUserById, createUser, updateUser, deleteUser, setUserStatus,
+    getAllPermissions, getUserPermissions,assignPermission, unassignPermission, syncPermissions
+}

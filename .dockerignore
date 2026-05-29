@@ -1,0 +1,41 @@
+# ── Fichiers à exclure du contexte de build backend ─────────
+# Évite d'envoyer des secrets et fichiers inutiles au daemon Docker
+
+# Dépendances locales (reconstruites dans le stage deps)
+node_modules/
+
+# Variables d'environnement — ne JAMAIS embarquer dans l'image
+.env
+.env.*
+*.env
+
+# Outils de développement et tests
+tests/
+test/
+__tests__/
+*.test.js
+*.spec.js
+jest.config.*
+.eslintrc*
+.prettierrc*
+
+# Documentation et fichiers de projet
+*.md
+README*
+docs/
+.git/
+.gitignore
+
+# Logs locaux
+logs/
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+
+# CI/CD
+.github/
+Dockerfile*
+docker-compose*
