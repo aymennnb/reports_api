@@ -111,7 +111,6 @@ const getMyTickets = async (req, res) => {
             console.error('[getMyTickets] getUserGroups failed: %s', err.message)
             return res.status(200).json({ count: 0, tickets: [] })
         }
-
         if (userGroups.length === 0) {
             return res.status(200).json({ count: 0, tickets: [] })
         }
@@ -132,7 +131,6 @@ const getMyTickets = async (req, res) => {
 const getTicketStats = async (req, res) => {
     try {
         const canViewAll = hasPermission(req, 'VIEW_TICKETS')
-
         let deptFilter = {}
 
         if (!canViewAll) {
