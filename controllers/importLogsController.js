@@ -1,23 +1,24 @@
+'use strict'
+
 const ImportLog    = require("../models/ImportLog");
 const { autoSyncNessus } = require("../services/nessusAutoSync");
 const { autoSyncWazuh  } = require("../services/wazuhAutoSync");
 
-
 const getLogs = async (req, res) => {
     try {
         const filter = {};
-        if (req.query.source)  filter.source  = req.query.source;
-        if (req.query.status)  filter.status  = req.query.status;
-        if (req.query.trigger) filter.trigger = req.query.trigger;
+
+        if (req.query.source)  filter.source  = String(req.query.source);
+        if (req.query.status)  filter.status  = String(req.query.status);
+        if (req.query.trigger) filter.trigger = String(req.query.trigger);
 
         if (req.query.from || req.query.to) {
-            filter.started_at = {};
-            if (req.query.from) filter.started_at.$gte = new Date(req.query.from);
-            if (req.query.to)   filter.started_at.$lte = new Date(req.query.to);
+            filter.started_at = {};if (req.query.from) filter.started_at.$gte = new Date(String(req.query.from));
+            if (req.query.to)   filter.started_at.$lte = new Date(String(req.query.to));
         }
 
-        const page  = parseInt(req.query.page  || "1");
-        const limit = parseInt(req.query.limit || "20");
+        const page  = parseInt(String(req.query.page  || "1"),  10) || 1;
+        const limit = parseInt(String(req.query.limit || "20"), 10) || 20;
         const skip  = (page - 1) * limit;
 
         const [logs, total] = await Promise.all([
@@ -42,8 +43,8 @@ const getLogs = async (req, res) => {
 };
 
 const getLogById = async (req, res) => {
-    try {
-        const log = await ImportLog.findById(req.params.id);
+    try {const safeId = String(req.params.id);
+        const log = await ImportLog.findById(safeId);
         if (!log) return res.status(404).json({ message: "Log not found." });
         res.status(200).json(log);
     } catch (err) {
@@ -82,7 +83,7 @@ const getLogStats = async (req, res) => {
 };
 
 const triggerManualImport = async (req, res) => {
-    const { source } = req.params;
+    const source = String(req.params.source);
 
     if (!["nessus", "wazuh"].includes(source)) {
         return res.status(400).json({ message: 'source doit être "nessus" ou "wazuh".' });
@@ -90,7 +91,6 @@ const triggerManualImport = async (req, res) => {
 
     try {
         let stats;
-
         if (source === "nessus") {
             stats = await autoSyncNessus("manual");
         } else {
@@ -101,9 +101,9 @@ const triggerManualImport = async (req, res) => {
             message: `Import ${source} déclenché manuellement avec succès.`,
             stats,
         });
-    } catch (err) {
+    } catch (err) {console.error("[triggerManualImport] Import failed for source %s: %s", source, err.message);
         res.status(500).json({
-            message: `Import ${source} échoué: ${err.message}`,
+            message: `Import ${source} échoué. Consultez les logs serveur.`,
         });
     }
 };
