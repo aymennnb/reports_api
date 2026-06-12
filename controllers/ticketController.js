@@ -12,6 +12,10 @@ const Incident = require('../models/Incident')
 const { KeycloakAdmin } = require('../services/keycloakAdmin')
 const { Types } = require('mongoose')
 const { logAction } = require('../services/journalService')
+const {
+    isSimpleText, sanitizeLongText, isSafeLongText, isInEnum,
+    TICKET_PRIORITIES, TICKET_STATUSES,
+} = require('../utils/validators')
 
 // ─── Permission helpers ────────────────────────────────────────────────────────
 
@@ -253,6 +257,35 @@ const createTicket = async (req, res) => {
         if (!isValidObjectId(incident_id))
             return res.status(400).json({ message: 'Invalid incident_id format.' })
 
+        // ── Validation: name (texte simple) ──────────────────────────────
+        if (!isSimpleText(name)) {
+            return res.status(400).json({ message: 'Le nom du ticket contient des caractères non autorisés (lettres, chiffres, espaces, - et _ uniquement).' })
+        }
+
+        // ── Validation: department_id (texte simple — id Keycloak) ────────
+        if (!isSimpleText(department_id)) {
+            return res.status(400).json({ message: 'department_id contient des caractères non autorisés.' })
+        }
+
+        // ── Validation: department_name (texte simple) ────────────────────
+        if (!isSimpleText(department_name)) {
+            return res.status(400).json({ message: 'department_name contient des caractères non autorisés.' })
+        }
+
+        // ── Validation: priority (enum, optionnel) ─────────────────────────
+        if (priority !== undefined && priority !== null && priority !== '' && !isInEnum(priority, TICKET_PRIORITIES)) {
+            return res.status(400).json({ message: `priority invalide. Valeurs autorisées: ${TICKET_PRIORITIES.join(', ')}.` })
+        }
+
+        // ── Validation: notes (texte long, sanitization, optionnel) ────────
+        let cleanNotes = notes || null
+        if (notes !== undefined && notes !== null && notes !== '') {
+            if (typeof notes !== 'string' || !isSafeLongText(notes)) {
+                return res.status(400).json({ message: 'notes contient des caractères non autorisés ($).' })
+            }
+            cleanNotes = sanitizeLongText(notes)
+        }
+
         const incident = await Incident.findById(incident_id)
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
 
@@ -275,7 +308,7 @@ const createTicket = async (req, res) => {
                 name: department_name,
             },
             priority: priority || 'medium',
-            notes:    notes    || null,
+            notes:    cleanNotes,
             status:   'open',
         }).save()
 
@@ -329,14 +362,54 @@ const updateTicket = async (req, res) => {
 
         const updates = {}
 
-        // Champs scalaires autorisés
-        const SCALAR_FIELDS = ['name', 'status', 'priority', 'notes']
-        SCALAR_FIELDS.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] })
+        // ── Validation: name ──────────────────────────────────────────────
+        if (req.body.name !== undefined) {
+            if (!isSimpleText(req.body.name)) {
+                return res.status(400).json({ message: 'Le nom du ticket contient des caractères non autorisés (lettres, chiffres, espaces, - et _ uniquement).' })
+            }
+            updates.name = req.body.name
+        }
+
+        // ── Validation: status (enum) ───────────────────────────────────────
+        if (req.body.status !== undefined) {
+            if (!isInEnum(req.body.status, TICKET_STATUSES)) {
+                return res.status(400).json({ message: `status invalide. Valeurs autorisées: ${TICKET_STATUSES.join(', ')}.` })
+            }
+            updates.status = req.body.status
+        }
+
+        // ── Validation: priority (enum) ───────────────────────────────────────
+        if (req.body.priority !== undefined) {
+            if (!isInEnum(req.body.priority, TICKET_PRIORITIES)) {
+                return res.status(400).json({ message: `priority invalide. Valeurs autorisées: ${TICKET_PRIORITIES.join(', ')}.` })
+            }
+            updates.priority = req.body.priority
+        }
+
+        // ── Validation: notes (texte long, sanitization) ───────────────────
+        if (req.body.notes !== undefined) {
+            if (req.body.notes !== null && req.body.notes !== '') {
+                if (typeof req.body.notes !== 'string' || !isSafeLongText(req.body.notes)) {
+                    return res.status(400).json({ message: 'notes contient des caractères non autorisés ($).' })
+                }
+                updates.notes = sanitizeLongText(req.body.notes)
+            } else {
+                updates.notes = req.body.notes
+            }
+        }
 
         // Réassignation de département
         if (req.body.department_id || req.body.department_name) {
             const newId   = req.body.department_id   || ticket.department.id
             const newName = req.body.department_name || ticket.department.name
+
+            // ── Validation: department_id / department_name (texte simple) ─
+            if (!isSimpleText(newId)) {
+                return res.status(400).json({ message: 'department_id contient des caractères non autorisés.' })
+            }
+            if (!isSimpleText(newName)) {
+                return res.status(400).json({ message: 'department_name contient des caractères non autorisés.' })
+            }
 
             // Valider le groupe
             try {

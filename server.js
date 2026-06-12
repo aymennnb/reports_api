@@ -10,7 +10,22 @@ const rateLimit  = require('express-rate-limit')
 
 const app = express()
 
-app.use(helmet())
+// ── Helmet ────────────────────────────────────────────────────────────────────
+app.use(helmet({
+    contentSecurityPolicy:          false,
+    hsts:                           false,
+    frameguard:                     false,
+    referrerPolicy:                 false,
+    xssFilter:                      false,
+    noSniff:                        false,
+    permittedCrossDomainPolicies:   false,
+    crossOriginEmbedderPolicy:      false,
+    crossOriginOpenerPolicy:        false,
+    crossOriginResourcePolicy:      false,
+    originAgentCluster:             false,
+    hidePoweredBy:                  true,
+    ieNoOpen:                       true,
+}))
 
 const ALLOWED_ORIGINS = (process.env.FRONTEND_URL)
     .split(',')
@@ -31,42 +46,49 @@ app.use(cors({
     optionsSuccessStatus: 200,
 }))
 
-// ── Rate limiters ─────────────────────────────────────────────────────────────
+// ── Rate limiters (défense en profondeur derrière Nginx) ──────────────────────
+// Nginx est la première ligne de défense (limit_req_zone).
+// Ces limiters Node.js sont un filet de sécurité secondaire,
+// avec un seuil plus élevé pour ne PAS bloquer les vrais utilisateurs.
 
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max:      200,
+    max:      500,              // Plus permissif : Nginx filtre déjà avant
     standardHeaders: true,
     legacyHeaders:   false,
+    keyGenerator: (req) => req.ip,
+    skip: (req) => {
+        const whitelist = (process.env.IP_WHITELIST || '').split(',').map(ip => ip.trim()).filter(Boolean)
+        return whitelist.includes(req.ip)
+    },
     message: { message: 'Too many requests, please try again later.' },
 })
 app.use('/api', globalLimiter)
 
-// Limiter strict sur les routes d'authentification (brute-force protection)
 const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,  // 15 minutes
-    max:      20,               // 20 tentatives par fenêtre par IP
+    windowMs: 15 * 60 * 1000,
+    max:      50,               // Plus permissif : Nginx limite déjà à 1r/s
     standardHeaders: true,
     legacyHeaders:   false,
+    keyGenerator: (req) => req.ip,
+    skip: (req) => {
+        const whitelist = (process.env.IP_WHITELIST || '').split(',').map(ip => ip.trim()).filter(Boolean)
+        return whitelist.includes(req.ip)
+    },
     message: { message: 'Too many login attempts, please try again later.' },
 })
 
-// ── Body parsers ──────────────────────────────────────────────────────────────
+app.set('trust proxy', 1)
 
+// ── Body parsers ──────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '5mb' }))
 app.use(express.urlencoded({ extended: true }))
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-
-// Auth — publique, AVANT /api et son authenticate middleware
-// Le authLimiter protège contre le brute-force sur /auth/login
 app.use('/api/auth', authLimiter, require('./routes/auth.routes'))
-
-// API — toutes les routes métier existantes (inchangées)
 app.use('/api', require('./routes/index'))
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────
-
 app.get('/health', (req, res) => res.json({
     status: 'ok',
     keycloak: process.env.KEYCLOAK_URL,
@@ -86,7 +108,6 @@ app.use((err, req, res, next) => {
 })
 
 // ── Démarrage ─────────────────────────────────────────────────────────────────
-
 const PORT = process.env.PORT || 5000
 
 mongoose

@@ -40,7 +40,7 @@ const verifyToken = (rawToken) => {
             getPublicKey,
             {
                 algorithms: config.algorithms,
-                issuer:     config.issuer,
+//                issuer:     config.issuer,
             },
             (err, decoded) => {
                 if (err) {
