@@ -8,6 +8,8 @@ const {
     INCIDENT_SEVERITIES, INCIDENT_STATUSES,
 } = require('../utils/validators')
 
+const { sanitizeObjectId } = require('../utils/validators')
+
 const getRoles = (req) => req.keycloakUser?.roles || req.user?.roles || []
 
 const isAdmin = (req) => getRoles(req).includes('admin')
@@ -59,7 +61,11 @@ const getIncidentById = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'VIEW_INCIDENT_DETAILS')
         if (!allowed) return res.status(403).json({ message: 'Permission required: VIEW_INCIDENT_DETAILS' })
-        const incident = await Incident.findById(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
+
+        const safeId = sanitizeObjectId(req.params.id) // SÉCURISATION SAST [CWE-943]
+        if (!safeId) return res.status(400).json({ message: 'Invalid incident ID format.' })
+
+        const incident = await Incident.findById(safeId)
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
         res.status(200).json(incident.toObject({ virtuals: true }))
     } catch (error) {
@@ -164,7 +170,11 @@ const updateIncident = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'UPDATE_INCIDENT')
         if (!allowed) return res.status(403).json({ message: 'Permission required: UPDATE_INCIDENT' })
-        const incident = await Incident.findById(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
+
+        const safeId = sanitizeObjectId(req.params.id) // SÉCURISATION SAST [CWE-943]
+        if (!safeId) return res.status(400).json({ message: 'Invalid incident ID format.' })
+
+        const incident = await Incident.findById(safeId) // SÉCURISATION SAST [CWE-943]
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
 
         const body = { ...req.body }
@@ -212,7 +222,7 @@ const updateIncident = async (req, res) => {
             body.rule_level = parsedRuleLevel
         }
 
-        const updated = await Incident.findByIdAndUpdate(String(req.params.id), body, { new: true }) // SÉCURISATION SAST [CWE-943]
+        const updated = await Incident.findByIdAndUpdate(safeId, body, { new: true }) // SÉCURISATION SAST [CWE-943]
 
         try {
             await logAction(req, {
@@ -239,9 +249,14 @@ const deleteIncident = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'DELETE_INCIDENT')
         if (!allowed) return res.status(403).json({ message: 'Permission required: DELETE_INCIDENT' })
-        const incident = await Incident.findById(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
+
+        const safeId = sanitizeObjectId(req.params.id) // SÉCURISATION SAST [CWE-943]
+        if (!safeId) return res.status(400).json({ message: 'Invalid incident ID format.' })
+
+        const incident = await Incident.findById(safeId) // SÉCURISATION SAST [CWE-943]
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
-        await Incident.findByIdAndDelete(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
+
+        await Incident.findByIdAndDelete(safeId) // SÉCURISATION SAST [CWE-943]
 
         try {
             await logAction(req, {
