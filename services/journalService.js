@@ -28,7 +28,7 @@ const logAction = async (req, { action, target_type, target_id = null, metadata 
             status,
         })
     } catch (err) {
-        console.error('[Journal] Failed to write audit log:', err.message, { action, target_type, target_id })
+        console.error('[Journal] Failed to write audit log: %s', err.message, { action, target_type, target_id })
     }
 }
 

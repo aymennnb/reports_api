@@ -34,7 +34,7 @@ const authenticate = async (req, res, next) => {
         const message = err.message || 'Authentication failed.'
         const code    = err.code    || 'AUTH_ERROR'
 
-        console.warn(`[Auth] ${code}: ${message} — IP: ${req.ip}`)
+        console.warn("[Auth] %s: %s — IP: %s", code, message, req.ip)
 
         return res.status(status).json({ message, code })
     }

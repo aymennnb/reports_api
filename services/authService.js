@@ -75,15 +75,6 @@ const _handleKcError = (err) => {
     throw e
 }
 
-// ─── Service ──────────────────────────────────────────────────────────────────
-
-/**
- * Authentifie un utilisateur via le Resource Owner Password Credentials flow.
- *
- * ⚠️  Ce flow est acceptable dans un contexte enterprise où le frontend
- *     est une application first-party contrôlée, et où Keycloak est interne.
- *     Le backend est le seul à connaître le client_secret.
- */
 const loginWithPassword = async (username, password) => {
     const params = new URLSearchParams({
         grant_type:    'password',
@@ -161,8 +152,7 @@ const revokeToken = async (refreshToken) => {
             timeout: 5_000,
         })
     } catch (err) {
-        // Erreur non fatale : la session locale sera quand même détruite
-        console.warn('[AuthService] Token revocation failed (non-fatal):', err.message)
+        console.warn('[AuthService] Token revocation failed (non-fatal): %s', err.message)
     }
 }
 

@@ -36,7 +36,7 @@ app.use(cors({
         if (!origin || ALLOWED_ORIGINS.includes(origin)) {
             return callback(null, true)
         }
-        console.warn(`[CORS] Blocked origin: ${origin}`)
+        console.warn("[CORS] Blocked origin: %s", origin)
         callback(new Error(`CORS: origin ${origin} not allowed`))
     },
     methods:          ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -46,14 +46,9 @@ app.use(cors({
     optionsSuccessStatus: 200,
 }))
 
-// ── Rate limiters (défense en profondeur derrière Nginx) ──────────────────────
-// Nginx est la première ligne de défense (limit_req_zone).
-// Ces limiters Node.js sont un filet de sécurité secondaire,
-// avec un seuil plus élevé pour ne PAS bloquer les vrais utilisateurs.
-
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max:      500,              // Plus permissif : Nginx filtre déjà avant
+    max:      500,
     standardHeaders: true,
     legacyHeaders:   false,
     keyGenerator: (req) => req.ip,
@@ -103,7 +98,7 @@ app.use((err, req, res, next) => {
     if (err.message?.startsWith('CORS:')) {
         return res.status(403).json({ message: err.message })
     }
-    console.error('[Server Error]', err)
+    console.error('[Server Error] %s', err.message || err)
     res.status(500).json({ message: 'Internal server error.' })
 })
 
@@ -115,13 +110,13 @@ mongoose
     .then(() => {
         console.log('MongoDB connected')
         app.listen(PORT, () => {
-            console.log(`Server running on port ${PORT}`)
+            console.log("Server running on port %s", PORT)
             console.log(`Auth endpoints: POST /auth/login | POST /auth/refresh | POST /auth/logout`)
-            console.log(`Keycloak: ${process.env.KEYCLOAK_URL}/realms/${process.env.KEYCLOAK_REALM}`)
-            console.log(`CORS allowed: ${ALLOWED_ORIGINS.join(', ')}`)
+            console.log("Keycloak: %s/realms/%s", process.env.KEYCLOAK_URL, process.env.KEYCLOAK_REALM)
+            console.log("CORS allowed: %s", ALLOWED_ORIGINS.join(', '))
         })
     })
     .catch(err => {
-        console.error('MongoDB connection error:', err.message)
+        console.error('MongoDB connection error: %s', err.message)
         process.exit(1)
     })
