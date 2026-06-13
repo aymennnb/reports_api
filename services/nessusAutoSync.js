@@ -25,16 +25,16 @@ const autoSyncNessus = async (trigger = "scheduler") => {
     try {
         scansData = await nessusService.getScans();
     } catch (err) {
-        logger.error(`Impossible de récupérer les scans Nessus: ${err.message}`);
+        logger.error("Impossible de récupérer les scans Nessus: %s", err.message);
         await logger.finish({ stats: globalStats, status: "error", error: err.message });
         throw err;
     }
 
     const allScans = scansData.scans || [];
-    logger.info(`${allScans.length} scan(s) trouvé(s) sur Nessus`);
+    logger.info("%s scan(s) trouvé(s) sur Nessus", allScans.length);
 
     if (allScans.length === 0) {
-        logger.warn("Aucun scan disponible sur Nessus.");
+        logger.info("%s scan(s) avec status \"completed\" à traiter", completedScans.length);
         await logger.finish({ stats: globalStats, status: "success" });
         return globalStats;
     }
@@ -43,18 +43,19 @@ const autoSyncNessus = async (trigger = "scheduler") => {
     logger.info(`${completedScans.length} scan(s) avec status "completed" à traiter`);
 
     for (const scan of completedScans) {
-        logger.info(`Traitement du scan: ${scan.name} (ID: ${scan.id})`);
+        logger.info("Traitement du scan: %s (ID: %s)", scan.name, scan.id);
 
         try {
             const scanDetail = await nessusService.getScanById(scan.id);
 
             if (!scanDetail.vulnerabilities?.length) {
-                logger.info(`Scan ${scan.name}: aucune vulnérabilité détectée — ignoré`);
+                logger.info("Scan %s: aucune vulnérabilité détectée — ignoré", scan.name);
                 continue;
             }
 
             logger.info(
-                `Scan ${scan.name}: ${scanDetail.vulnerabilities.length} vulnérabilité(s) à analyser`
+                "Scan %s: %s vulnérabilité(s) à analyser",
+                scan.name, scanDetail.vulnerabilities.length
             );
 
             const pluginMap = await nessusService.getAllPluginDetails(
@@ -73,14 +74,12 @@ const autoSyncNessus = async (trigger = "scheduler") => {
             globalStats.resolved += scanStats.resolved;
 
             logger.info(
-                `Scan ${scan.name} terminé — ` +
-                `insérés: ${scanStats.inserted}, mis à jour: ${scanStats.updated}, ` +
-                `résolus: ${scanStats.resolved}`
+                "Scan %s terminé — insérés: %s, mis à jour: %s, résolus: %s",
+                scan.name, scanStats.inserted, scanStats.updated, scanStats.resolved
             );
 
         } catch (scanErr) {
-            // Un scan en erreur ne bloque pas les autres
-            logger.error(`Erreur sur le scan ${scan.name} (ID: ${scan.id}): ${scanErr.message}`);
+            logger.error("Erreur sur le scan %s (ID: %s): %s", scan.name, scan.id, scanErr.message);
             globalStats.errors++;
         }
     }
@@ -91,9 +90,8 @@ const autoSyncNessus = async (trigger = "scheduler") => {
         : "success";
 
     logger.info(
-        `Synchronisation Nessus terminée — ` +
-        `insérés: ${globalStats.inserted}, mis à jour: ${globalStats.updated}, ` +
-        `résolus: ${globalStats.resolved}, erreurs: ${globalStats.errors}`
+        "Synchronisation Nessus terminée — insérés: %s, mis à jour: %s, résolus: %s, erreurs: %s",
+        globalStats.inserted, globalStats.updated, globalStats.resolved, globalStats.errors
     );
 
     await logger.finish({ stats: globalStats, status: finalStatus });

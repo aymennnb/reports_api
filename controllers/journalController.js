@@ -10,7 +10,7 @@ const getAllJournals = async (req, res) => {
             journals,
         })
     } catch (error) {
-        console.error('[getAllJournals]', error.message)
+        console.error('[getAllJournals] %s', error.message)
 
         res.status(500).json({
             message: 'Failed to fetch journals.',

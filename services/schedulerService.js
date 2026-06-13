@@ -16,14 +16,14 @@ const withRetry = async (fn, jobName, retries = MAX_RETRIES, attempt = 0) => {
         return await fn();
     } catch (err) {
         if (retries <= 0) {
-            console.error(`[SCHEDULER] ${jobName} — échec définitif après ${MAX_RETRIES} tentatives: ${err.message}`);
+            console.error("[SCHEDULER] %s — échec définitif après %s tentatives: %s", jobName, MAX_RETRIES, err.message); // SÉCURISATION SAST [CWE-134]
             throw err;
         }
 
         const delay = RETRY_DELAY * Math.pow(2, attempt);
         console.warn(
-            `[SCHEDULER] ${jobName} — erreur (tentative ${attempt + 1}/${MAX_RETRIES}), ` +
-            `retry dans ${delay / 1000}s: ${err.message}`
+            "[SCHEDULER] %s — erreur (tentative %s/%s), retry dans %ss: %s", // SÉCURISATION SAST [CWE-134]
+            jobName, attempt + 1, MAX_RETRIES, delay / 1000, err.message
         );
 
         await sleep(delay);
@@ -33,7 +33,7 @@ const withRetry = async (fn, jobName, retries = MAX_RETRIES, attempt = 0) => {
 
 const startNessusJob = () => {
     if (!cron.validate(NESSUS_CRON)) {
-        console.error(`[SCHEDULER] Expression cron Nessus invalide: "${NESSUS_CRON}"`);
+        console.error("[SCHEDULER] Expression cron Nessus invalide: \"%s\"", NESSUS_CRON); // SÉCURISATION SAST [CWE-134]
         return null;
     }
 
@@ -44,7 +44,7 @@ const startNessusJob = () => {
         }
 
         isNessusRunning = true;
-        console.log(`[SCHEDULER] Job Nessus démarré (${new Date().toISOString()})`);
+        console.log("[SCHEDULER] Job Nessus démarré (%s)", new Date().toISOString()); // SÉCURISATION SAST [CWE-134]
 
         try {
             await withRetry(
@@ -54,17 +54,17 @@ const startNessusJob = () => {
         } catch (err) {
         } finally {
             isNessusRunning = false;
-            console.log(`[SCHEDULER] Job Nessus terminé (${new Date().toISOString()})`);
+            console.log("[SCHEDULER] Job Nessus terminé (%s)", new Date().toISOString()); // SÉCURISATION SAST [CWE-134]
         }
     });
 
-    console.log(`[SCHEDULER] Job Nessus planifié: "${NESSUS_CRON}"`);
+    console.log("[SCHEDULER] Job Nessus planifié: \"%s\"", NESSUS_CRON); // SÉCURISATION SAST [CWE-134]
     return job;
 };
 
 const startWazuhJob = () => {
     if (!cron.validate(WAZUH_CRON)) {
-        console.error(`[SCHEDULER] Expression cron Wazuh invalide: "${WAZUH_CRON}"`);
+        console.error("[SCHEDULER] Expression cron Wazuh invalide: \"%s\"", WAZUH_CRON); // SÉCURISATION SAST [CWE-134]
         return null;
     }
 
@@ -75,7 +75,7 @@ const startWazuhJob = () => {
         }
 
         isWazuhRunning = true;
-        console.log(`[SCHEDULER] Job Wazuh démarré (${new Date().toISOString()})`);
+        console.log("[SCHEDULER] Job Wazuh démarré (%s)", new Date().toISOString()); // SÉCURISATION SAST [CWE-134]
 
         try {
             await withRetry(
@@ -85,20 +85,20 @@ const startWazuhJob = () => {
         } catch (err) {
         } finally {
             isWazuhRunning = false;
-            console.log(`[SCHEDULER] Job Wazuh terminé (${new Date().toISOString()})`);
+            console.log("[SCHEDULER] Job Wazuh terminé (%s)", new Date().toISOString()); // SÉCURISATION SAST [CWE-134]
         }
     });
 
-    console.log(`[SCHEDULER] Job Wazuh planifié: "${WAZUH_CRON}"`);
+    console.log("[SCHEDULER] Job Wazuh planifié: \"%s\"", WAZUH_CRON); // SÉCURISATION SAST [CWE-134]
     return job;
 };
 
 const initScheduler = async () => {
     console.log("[SCHEDULER] Initialisation du scheduler...");
-    console.log(`[SCHEDULER] Nessus  : ${NESSUS_CRON}`);
-    console.log(`[SCHEDULER] Wazuh   : ${WAZUH_CRON}`);
-    console.log(`[SCHEDULER] Retries : ${MAX_RETRIES} × ${RETRY_DELAY}ms`);
--
+    console.log("[SCHEDULER] Nessus  : %s", NESSUS_CRON); // SÉCURISATION SAST [CWE-134]
+    console.log("[SCHEDULER] Wazuh   : %s", WAZUH_CRON); // SÉCURISATION SAST [CWE-134]
+    console.log("[SCHEDULER] Retries : %s × %sms", MAX_RETRIES, RETRY_DELAY); // SÉCURISATION SAST [CWE-134]
+
     startNessusJob();
     startWazuhJob();
 
