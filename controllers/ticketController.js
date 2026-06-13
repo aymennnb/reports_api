@@ -12,6 +12,8 @@ const {
     TICKET_PRIORITIES, TICKET_STATUSES,
 } = require('../utils/validators')
 
+const { sanitizeObjectId } = require('../utils/validators')
+
 // ─── Permission helpers ────────────────────────────────────────────────────────
 
 const getRoles = (req) => req.keycloakUser?.roles || req.user?.roles || []
@@ -42,7 +44,8 @@ const getUserGroups = async (userId) => {
 const populateTicket = async (ticket) => {
     const obj = ticket.toObject({ virtuals: true })
 
-    const incident = await Incident.findById(ticket.incident_id).lean()
+    const safeIncidentId = sanitizeObjectId(ticket.incident_id) // SÉCURISATION SAST [CWE-943]
+    const incident = safeIncidentId ? await Incident.findById(safeIncidentId).lean() : null
 
     let createdByUser = null
     try {
@@ -175,9 +178,8 @@ const getTicketById = async (req, res) => {
         const allowed = hasPermission(req, 'VIEW_TICKETS')
         if (!allowed) return res.status(403).json({ message: 'Permission required: VIEW_TICKETS' })
 
-        const safeId = String(req.params.id)
-        if (!isValidObjectId(safeId))
-            return res.status(400).json({ message: 'Invalid ticket ID format.' })
+        const safeId = sanitizeObjectId(req.params.id) // SÉCURISATION SAST [CWE-943]
+        if (!safeId) return res.status(400).json({ message: 'Invalid ticket ID format.' })
 
         const ticket = await Ticket.findById(safeId)
         if (!ticket) return res.status(404).json({ message: 'Ticket not found.' })
@@ -195,9 +197,8 @@ const getTicketsByIncident = async (req, res) => {
         const allowed = hasPermission(req, 'VIEW_TICKETS')
         if (!allowed) return res.status(403).json({ message: 'Permission required: VIEW_TICKETS' })
 
-        const safeId = String(req.params.id)
-        if (!isValidObjectId(safeId))
-            return res.status(400).json({ message: 'Invalid incident ID format.' })
+        const safeId = sanitizeObjectId(req.params.id) // SÉCURISATION SAST [CWE-943]
+        if (!safeId) return res.status(400).json({ message: 'Invalid incident ID format.' })
 
         const incident = await Incident.findById(safeId)
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
@@ -226,8 +227,8 @@ const createTicket = async (req, res) => {
         if (!incident_id || !department_id || !department_name)
             return res.status(400).json({ message: 'incident_id, department_id and department_name are required.' })
 
-        const safeIncidentId = String(incident_id)
-        if (!isValidObjectId(safeIncidentId))
+        const safeIncidentId = sanitizeObjectId(incident_id) // SÉCURISATION SAST [CWE-943]
+        if (!safeIncidentId)
             return res.status(400).json({ message: 'Invalid incident_id format.' })
 
         if (!isSimpleText(name)) {
@@ -254,7 +255,7 @@ const createTicket = async (req, res) => {
             cleanNotes = sanitizeLongText(notes)
         }
 
-        const incident = await Incident.findById(safeIncidentId)
+        const incident = await Incident.findById(safeIncidentId) // SÉCURISATION SAST [CWE-943]
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
 
         try {
@@ -320,11 +321,10 @@ const updateTicket = async (req, res) => {
         const allowed = hasPermission(req, 'UPDATE_TICKET')
         if (!allowed) return res.status(403).json({ message: 'Permission required: UPDATE_TICKET' })
 
-        const safeId = String(req.params.id)
-        if (!isValidObjectId(safeId))
-            return res.status(400).json({ message: 'Invalid ticket ID format.' })
+        const safeId = sanitizeObjectId(req.params.id) // SÉCURISATION SAST [CWE-943]
+        if (!safeId) return res.status(400).json({ message: 'Invalid ticket ID format.' })
 
-        const ticket = await Ticket.findById(safeId)
+        const ticket = await Ticket.findById(safeId) // SÉCURISATION SAST [CWE-943]
         if (!ticket) return res.status(404).json({ message: 'Ticket not found.' })
 
         const updates = {}
@@ -384,7 +384,7 @@ const updateTicket = async (req, res) => {
             updates['department.name'] = String(newName)
         }
 
-        const updated = await Ticket.findByIdAndUpdate(safeId, updates, { new: true })
+        const updated = await Ticket.findByIdAndUpdate(safeId, updates, { new: true }) // SÉCURISATION SAST [CWE-943]
 
         await logAction(req, {
             action:      'UPDATE_TICKET',
@@ -437,14 +437,13 @@ const deleteTicket = async (req, res) => {
         const allowed = hasPermission(req, 'DELETE_TICKET')
         if (!allowed) return res.status(403).json({ message: 'Permission required: DELETE_TICKET' })
 
-        const safeId = String(req.params.id)
-        if (!isValidObjectId(safeId))
-            return res.status(400).json({ message: 'Invalid ticket ID format.' })
+        const safeId = sanitizeObjectId(req.params.id) // SÉCURISATION SAST [CWE-943]
+        if (!safeId) return res.status(400).json({ message: 'Invalid ticket ID format.' })
 
-        const ticket = await Ticket.findById(safeId)
+        const ticket = await Ticket.findById(safeId) // SÉCURISATION SAST [CWE-943]
         if (!ticket) return res.status(404).json({ message: 'Ticket not found.' })
 
-        await Ticket.findByIdAndDelete(safeId)
+        await Ticket.findByIdAndDelete(safeId) // SÉCURISATION SAST [CWE-943]
 
         await logAction(req, {
             action:      'DELETE_TICKET',

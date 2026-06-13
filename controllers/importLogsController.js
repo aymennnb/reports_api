@@ -3,6 +3,7 @@
 const ImportLog    = require("../models/ImportLog");
 const { autoSyncNessus } = require("../services/nessusAutoSync");
 const { autoSyncWazuh  } = require("../services/wazuhAutoSync");
+const { sanitizeObjectId } = require("../utils/validators");
 
 const getLogs = async (req, res) => {
     try {
@@ -13,7 +14,8 @@ const getLogs = async (req, res) => {
         if (req.query.trigger) filter.trigger = String(req.query.trigger);
 
         if (req.query.from || req.query.to) {
-            filter.started_at = {};if (req.query.from) filter.started_at.$gte = new Date(String(req.query.from));
+            filter.started_at = {};
+            if (req.query.from) filter.started_at.$gte = new Date(String(req.query.from));
             if (req.query.to)   filter.started_at.$lte = new Date(String(req.query.to));
         }
 
@@ -44,7 +46,9 @@ const getLogs = async (req, res) => {
 
 const getLogById = async (req, res) => {
     try {
-        const safeId = String(req.params.id); // SÉCURISATION SAST [CWE-943]
+        const safeId = sanitizeObjectId(req.params.id) // SÉCURISATION SAST [CWE-943]
+        if (!safeId) return res.status(400).json({ message: "Invalid log ID format." })
+
         const log = await ImportLog.findById(safeId);
         if (!log) return res.status(404).json({ message: "Log not found." });
         res.status(200).json(log);
@@ -103,7 +107,7 @@ const triggerManualImport = async (req, res) => {
             stats,
         });
     } catch (err) {
-        console.error("[triggerManualImport] Import failed for source %s: %s", source, err.message); // déjà sécurisé, aucune modification
+        console.error("[triggerManualImport] Import failed for source %s: %s", source, err.message);
         res.status(500).json({
             message: `Import ${source} échoué. Consultez les logs serveur.`,
         });
