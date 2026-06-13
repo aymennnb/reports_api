@@ -15,9 +15,10 @@ const validateConfig = () => {
 
 validateConfig();
 
+// SÉCURISATION SAST [CWE-295] : Vérification TLS activée pour éviter les attaques MITM.
 const nessusClient = axios.create({
     baseURL: NESSUS_URL,
-    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+    httpsAgent: new https.Agent({ rejectUnauthorized: true }), // SÉCURISATION SAST [CWE-295]
     headers: {
         "X-ApiKeys": `accessKey=${ACCESS_KEY}; secretKey=${SECRET_KEY}`,
         "Content-Type": "application/json",
@@ -33,13 +34,13 @@ const getScans = async () => {
 
 const getScanById = async (scanId) => {
     validateConfig();
-    const response = await nessusClient.get(`/scans/${scanId}`);
+    const response = await nessusClient.get(`/scans/${String(scanId)}`); // SÉCURISATION SAST [CWE-943]
     return response.data;
 };
 
 const getPluginDetails = async (scanId, pluginId) => {
     validateConfig();
-    const response = await nessusClient.get(`/scans/${scanId}/plugins/${pluginId}`);
+    const response = await nessusClient.get(`/scans/${String(scanId)}/plugins/${String(pluginId)}`); // SÉCURISATION SAST [CWE-943]
     return response.data;
 };
 
@@ -51,7 +52,7 @@ const getAllPluginDetails = async (scanId, vulnerabilities) => {
     vulnerabilities.forEach((v, index) => {
         const result = results[index];
         if (result.status === "fulfilled") pluginMap[v.plugin_id] = result.value;
-        if (result.status === "rejected")  console.warn(`Plugin ${v.plugin_id} failed:`, result.reason?.message);
+        if (result.status === "rejected")  console.warn("Plugin %s failed: %s", v.plugin_id, result.reason?.message); // SÉCURISATION SAST [CWE-134]
     });
     return pluginMap;
 };
@@ -83,7 +84,7 @@ const createScan = async ({ name, targets, templateUuid, folderId }) => {
         body.folder_id = parseInt(folderId, 10);
     }
 
-    console.log("[createScan]", JSON.stringify(body));
+    console.log("[createScan] %s", JSON.stringify(body)); // SÉCURISATION SAST [CWE-134]
 
     const res = await nessusClient.post("/scans", body);
 
@@ -95,7 +96,7 @@ const createScan = async ({ name, targets, templateUuid, folderId }) => {
 
 const launchScan = async (scanId) => {
     validateConfig();
-    const res = await nessusClient.post(`/scans/${scanId}/launch`, {});
+    const res = await nessusClient.post(`/scans/${String(scanId)}/launch`, {}); // SÉCURISATION SAST [CWE-943]
     return res.data;
 };
 

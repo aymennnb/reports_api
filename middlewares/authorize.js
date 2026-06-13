@@ -8,7 +8,7 @@ const requireRole = (role) => (req, res, next) => {
 
     const roles = user.roles || (user.role ? [user.role] : [])
     if (!roles.includes(role)) {
-        console.warn(`[AuthZ] requireRole('${role}') denied for user '${user.username}' (roles: ${roles.join(', ')})`)
+        console.warn("[AuthZ] requireRole('%s') denied for user '%s' (roles: %s)", role, user.username, roles.join(', ')); // SÉCURISATION SAST [CWE-134]
         return res.status(403).json({
             message: `Access denied. Required role: ${role}`,
             code:    'INSUFFICIENT_ROLE',
@@ -28,7 +28,7 @@ const requireAnyRole = (...roles) => (req, res, next) => {
     const authorized = roles.some(r => userRoles.includes(r))
 
     if (!authorized) {
-        console.warn(`[AuthZ] requireAnyRole(${roles.join('|')}) denied for '${user.username}' (roles: ${userRoles.join(', ')})`)
+        console.warn("[AuthZ] requireAnyRole(%s) denied for '%s' (roles: %s)", roles.join('|'), user.username, userRoles.join(', ')); // SÉCURISATION SAST [CWE-134]
         return res.status(403).json({
             message: `Access denied. Required one of: ${roles.join(', ')}`,
             code:    'INSUFFICIENT_ROLE',
