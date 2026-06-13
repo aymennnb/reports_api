@@ -1,37 +1,22 @@
 'use strict'
 
-/**
- * controllers/authController.js
- * ─────────────────────────────────────────────────────────────────────────────
- * AJOUTS :
- *   ✓ LOGIN_SUCCESS  — journal après authentification réussie
- *   ✓ LOGIN_FAILED   — journal après credentials invalides
- *   ✓ LOGOUT         — journal après déconnexion
- *
- * Règle : le log ne bloque JAMAIS la réponse (try/catch isolé).
- * Pour LOGIN_FAILED, user_id = 'anonymous' car l'utilisateur n'est pas connu.
- */
-
 const { loginWithPassword, refreshAccessToken, revokeToken } = require('../services/authService')
 const { logAction } = require('../services/journalService')
 
-// ─── Helper IP ────────────────────────────────────────────────────────────────
 const getIp = (req) =>
     req.headers['x-forwarded-for']?.split(',')[0]?.trim()
     ?? req.socket?.remoteAddress
     ?? req.ip
     ?? null
 
-// ─── Helper log — ne bloque jamais ───────────────────────────────────────────
 const safeLog = async (payload) => {
     try {
         await logAction(null, payload)
     } catch (err) {
-        console.warn('[AuthLog] Failed to write audit log (non-fatal):', err.message)
+        console.warn('[AuthLog] Failed to write audit log (non-fatal): %s', err.message) // SÉCURISATION SAST [CWE-134]
     }
 }
 
-// ─── POST /auth/login ─────────────────────────────────────────────────────────
 const login = async (req, res) => {
     const { username, password } = req.body
 
@@ -47,9 +32,8 @@ const login = async (req, res) => {
     try {
         const result = await loginWithPassword(username.trim(), password)
 
-        console.log(`[Auth] Login successful for user: ${result.userInfo.username}`)
+        console.log('[Auth] Login successful for user: %s', result.userInfo.username) // SÉCURISATION SAST [CWE-134]
 
-        // ── Audit log LOGIN_SUCCESS ───────────────────────────────────────────
         await safeLog({
             user_id:     result.userInfo.id,
             username:    result.userInfo.username,
@@ -72,9 +56,8 @@ const login = async (req, res) => {
         })
 
     } catch (err) {
-        console.warn(`[Auth] Login failed for "${username}" — ${err.code}: ${err.message}`)
+        console.warn('[Auth] Login failed for "%s" — %s: %s', username, err.code, err.message) // SÉCURISATION SAST [CWE-134]
 
-        // ── Audit log LOGIN_FAILED ────────────────────────────────────────────
         await safeLog({
             user_id:     'anonymous',
             username:    username.trim(),
@@ -96,7 +79,6 @@ const login = async (req, res) => {
     }
 }
 
-// ─── POST /auth/refresh ───────────────────────────────────────────────────────
 const refresh = async (req, res) => {
     const { refreshToken } = req.body
 
@@ -117,7 +99,7 @@ const refresh = async (req, res) => {
             userInfo:     result.userInfo,
         })
     } catch (err) {
-        console.warn(`[Auth] Token refresh failed — ${err.code}: ${err.message}`)
+        console.warn('[Auth] Token refresh failed — %s: %s', err.code, err.message) // SÉCURISATION SAST [CWE-134]
 
         return res.status(err.status || 401).json({
             message: err.message,
@@ -126,21 +108,17 @@ const refresh = async (req, res) => {
     }
 }
 
-// ─── POST /auth/logout ────────────────────────────────────────────────────────
 const logout = async (req, res) => {
     const { refreshToken } = req.body
     const ip = getIp(req)
 
-    // Révoquer le token côté Keycloak (best-effort)
     await revokeToken(refreshToken)
 
-    // req.user est défini si le Bearer token était encore valide
     const userId   = req.user?.id       ?? 'anonymous'
     const username = req.user?.username ?? 'unknown'
 
-    console.log(`[Auth] Logout for user: ${username}`)
+    console.log('[Auth] Logout for user: %s', username) // SÉCURISATION SAST [CWE-134]
 
-    // ── Audit log LOGOUT ──────────────────────────────────────────────────────
     await safeLog({
         user_id:     userId,
         username,

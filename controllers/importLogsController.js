@@ -43,7 +43,8 @@ const getLogs = async (req, res) => {
 };
 
 const getLogById = async (req, res) => {
-    try {const safeId = String(req.params.id);
+    try {
+        const safeId = String(req.params.id); // SÉCURISATION SAST [CWE-943]
         const log = await ImportLog.findById(safeId);
         if (!log) return res.status(404).json({ message: "Log not found." });
         res.status(200).json(log);
@@ -101,7 +102,8 @@ const triggerManualImport = async (req, res) => {
             message: `Import ${source} déclenché manuellement avec succès.`,
             stats,
         });
-    } catch (err) {console.error("[triggerManualImport] Import failed for source %s: %s", source, err.message);
+    } catch (err) {
+        console.error("[triggerManualImport] Import failed for source %s: %s", source, err.message); // déjà sécurisé, aucune modification
         res.status(500).json({
             message: `Import ${source} échoué. Consultez les logs serveur.`,
         });

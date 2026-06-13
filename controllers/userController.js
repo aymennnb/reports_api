@@ -18,7 +18,7 @@ const getMyProfile = async (req, res) => {
         const { id: keycloak_id, username, email } = req.keycloakUser
 
         const user = await User.findOneAndUpdate(
-            { keycloak_id },
+            { keycloak_id: String(keycloak_id) }, // SÉCURISATION SAST [CWE-943]
             { $setOnInsert: { keycloak_id, username, email } },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         )
@@ -33,7 +33,7 @@ const getMyProfile = async (req, res) => {
             created_at:  user.created_at,
         })
     } catch (error) {
-        console.error(error)
+        console.error('[getMyProfile] %s', error.message) // SÉCURISATION SAST [CWE-134]
         res.status(500).json({ message: 'Server error.' })
     }
 }
@@ -48,7 +48,7 @@ const updateMyProfile = async (req, res) => {
         })
 
         const updatedUser = await User.findOneAndUpdate(
-            { keycloak_id },
+            { keycloak_id: String(keycloak_id) }, // SÉCURISATION SAST [CWE-943]
             { $set: { ...updates, updated_at: new Date() } },
             { new: true }
         )
@@ -73,14 +73,14 @@ const getUsers = async (req, res) => {
         const users = await KeycloakAdmin.getUsers()
         res.status(200).json(users)
     } catch (error) {
-        console.error(error)
+        console.error('[getUsers] %s', error.message) // SÉCURISATION SAST [CWE-134]
         res.status(500).json({ message: 'Failed to fetch users from Keycloak.' })
     }
 }
 
 const getUserById = async (req, res) => {
     try {
-        const user = await KeycloakAdmin.getUserById(req.params.id)
+        const user = await KeycloakAdmin.getUserById(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
         if (!user) return res.status(404).json({ message: 'User not found.' })
         res.status(200).json(user)
     } catch (error) {
@@ -110,7 +110,7 @@ const createUser = async (req, res) => {
                 return res.status(409).json({ message: 'A user with this username or email already exists.' })
             }
 
-            console.error('[createUser] Keycloak user creation failed:', kcMessage)
+            console.error('[createUser] Keycloak user creation failed: %s', kcMessage) // SÉCURISATION SAST [CWE-134]
             return res.status(500).json({ message: kcMessage || 'Failed to create user in Keycloak.' })
         }
 
@@ -126,7 +126,7 @@ const createUser = async (req, res) => {
                 })
             } catch (roleError) {
                 const kcMessage = roleError?.response?.data?.errorMessage || roleError?.message
-                console.error(`[createUser] Role assignment failed for user ${kcUser.id}:`, kcMessage)
+                console.error('[createUser] Role assignment failed for user %s: %s', kcUser.id, kcMessage) // SÉCURISATION SAST [CWE-134]
 
                 await logAction(req, {
                     action:      'CREATE_USER',
@@ -153,7 +153,7 @@ const createUser = async (req, res) => {
         return res.status(201).json({ message: 'User created successfully.', id: kcUser.id })
 
     } catch (error) {
-        console.error('[createUser] Unexpected error:', error)
+        console.error('[createUser] Unexpected error: %s', error.message) // SÉCURISATION SAST [CWE-134]
         const msg = error?.response?.data?.errorMessage || error?.message || 'Server error.'
         return res.status(500).json({ message: msg })
     }
@@ -161,7 +161,7 @@ const createUser = async (req, res) => {
 
 const updateUser = async (req, res) => {
     try {
-        await KeycloakAdmin.updateUser(req.params.id, req.body)
+        await KeycloakAdmin.updateUser(String(req.params.id), req.body) // SÉCURISATION SAST [CWE-943]
 
         await logAction(req, {
             action:      'UPDATE_USER',
@@ -180,11 +180,11 @@ const deleteUser = async (req, res) => {
     try {
         let deletedUserInfo = null
         try {
-            deletedUserInfo = await KeycloakAdmin.getUserById(req.params.id)
+            deletedUserInfo = await KeycloakAdmin.getUserById(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
         } catch (_) {}
 
-        await KeycloakAdmin.deleteUser(req.params.id)
-        await User.findOneAndDelete({ keycloak_id: req.params.id })
+        await KeycloakAdmin.deleteUser(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
+        await User.findOneAndDelete({ keycloak_id: String(req.params.id) }) // SÉCURISATION SAST [CWE-943]
 
         await logAction(req, {
             action:      'DELETE_USER',
@@ -204,7 +204,7 @@ const deleteUser = async (req, res) => {
 
 const setUserStatus = (enabled) => async (req, res) => {
     try {
-        await KeycloakAdmin.updateUser(req.params.id, { enabled })
+        await KeycloakAdmin.updateUser(String(req.params.id), { enabled }) // SÉCURISATION SAST [CWE-943]
 
         await logAction(req, {
             action:      enabled ? 'ACTIVATE_USER' : 'DEACTIVATE_USER',
@@ -245,14 +245,13 @@ const getUserPermissions = async (req, res) => {
             return res.status(501).json({ message: 'getUserRealmRoles not implemented.' })
         }
 
-        const userRoles = await getUserRealmRoles(requestedId)
+        const userRoles = await getUserRealmRoles(String(requestedId)) // SÉCURISATION SAST [CWE-943]
         res.status(200).json({ permissions: userRoles })
     } catch (error) {
         res.status(500).json({ message: 'Server error.' })
     }
 }
 
-// ─── POST /users/:id/permissions/assign ───────────────────────────────────────
 const assignPermission = async (req, res) => {
     try {
         const roles = req.keycloakUser?.roles || []
@@ -270,7 +269,7 @@ const assignPermission = async (req, res) => {
             return res.status(400).json({ message: `Unknown or non-assignable permission: ${permission}` })
         }
 
-        await KeycloakAdmin.assignRealmRole(userId, permission)
+        await KeycloakAdmin.assignRealmRole(String(userId), String(permission)) // SÉCURISATION SAST [CWE-943]
 
         await logAction(req, {
             action:      'ASSIGN_PERMISSION',
@@ -282,12 +281,11 @@ const assignPermission = async (req, res) => {
         return res.status(200).json({ message: `Permission ${permission} assigned.` })
     } catch (err) {
         const msg = err?.response?.data?.errorMessage || err.message
-        console.error('[assignPermission]', msg)
+        console.error('[assignPermission] %s', msg) // SÉCURISATION SAST [CWE-134]
         return res.status(500).json({ message: msg || 'Server error.' })
     }
 }
 
-// ─── POST /users/:id/permissions/unassign ─────────────────────────────────────
 const unassignPermission = async (req, res) => {
     try {
         const roles = req.keycloakUser?.roles || []
@@ -302,7 +300,7 @@ const unassignPermission = async (req, res) => {
             return res.status(400).json({ message: 'permission is required.' })
         }
 
-        await KeycloakAdmin.removeRealmRole(userId, permission)
+        await KeycloakAdmin.removeRealmRole(String(userId), String(permission)) // SÉCURISATION SAST [CWE-943]
 
         await logAction(req, {
             action:      'UNASSIGN_PERMISSION',
@@ -314,13 +312,11 @@ const unassignPermission = async (req, res) => {
         return res.status(200).json({ message: `Permission ${permission} unassigned.` })
     } catch (err) {
         const msg = err?.response?.data?.errorMessage || err.message
-        console.error('[unassignPermission]', msg)
+        console.error('[unassignPermission] %s', msg) // SÉCURISATION SAST [CWE-134]
         return res.status(500).json({ message: msg || 'Server error.' })
     }
 }
 
-// ─── POST /users/:id/permissions/sync ─────────────────────────────────────────
-// Remplace TOUTES les permissions assignables du user par la liste fournie.
 const syncPermissions = async (req, res) => {
     try {
         const roles = req.keycloakUser?.roles || []
@@ -329,29 +325,26 @@ const syncPermissions = async (req, res) => {
         }
 
         const { id: userId }    = req.params
-        const { permissions }   = req.body  // tableau attendu
+        const { permissions }   = req.body
 
         if (!Array.isArray(permissions)) {
             return res.status(400).json({ message: 'permissions must be an array.' })
         }
 
-        // Valider chaque permission demandée
         const invalid = permissions.filter(p => !ASSIGNABLE_PERMISSIONS.includes(p))
         if (invalid.length > 0) {
             return res.status(400).json({ message: `Unknown permissions: ${invalid.join(', ')}` })
         }
 
-        // Récupérer les roles actuels du user
-        const currentRoles = await getUserRealmRoles(userId)
+        const currentRoles = await getUserRealmRoles(String(userId)) // SÉCURISATION SAST [CWE-943]
 
-        // Calculer diff — ne toucher QUE les ASSIGNABLE_PERMISSIONS
         const currentAssignable = currentRoles.filter(r => ASSIGNABLE_PERMISSIONS.includes(r))
         const toAdd    = permissions.filter(p => !currentAssignable.includes(p))
         const toRemove = currentAssignable.filter(p => !permissions.includes(p))
 
         await Promise.all([
-            ...toAdd.map(p    => KeycloakAdmin.assignRealmRole(userId, p)),
-            ...toRemove.map(p => KeycloakAdmin.removeRealmRole(userId, p)),
+            ...toAdd.map(p    => KeycloakAdmin.assignRealmRole(String(userId), String(p))), // SÉCURISATION SAST [CWE-943]
+            ...toRemove.map(p => KeycloakAdmin.removeRealmRole(String(userId), String(p))), // SÉCURISATION SAST [CWE-943]
         ])
 
         await logAction(req, {
@@ -374,7 +367,7 @@ const syncPermissions = async (req, res) => {
         })
     } catch (err) {
         const msg = err?.response?.data?.errorMessage || err.message
-        console.error('[syncPermissions]', msg)
+        console.error('[syncPermissions] %s', msg) // SÉCURISATION SAST [CWE-134]
         return res.status(500).json({ message: msg || 'Server error.' })
     }
 }

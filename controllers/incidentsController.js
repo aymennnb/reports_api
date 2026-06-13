@@ -30,18 +30,18 @@ const getAllIncidents = async (req, res) => {
         }
 
         const filter = {}
-        if (req.query.status)      filter.status     = req.query.status
+        if (req.query.status)      filter.status     = String(req.query.status) // SÉCURISATION SAST [CWE-943]
         if (req.query.severity)    filter.severity   = parseInt(req.query.severity)
-        if (req.query.agent_name)  filter.agent_name = req.query.agent_name
-        if (req.query.source)      filter.source     = req.query.source
-        if (req.query.Source)      filter.source     = req.query.Source
-        if (req.query.title)       filter.title      = { $regex: req.query.title, $options: 'i' }
+        if (req.query.agent_name)  filter.agent_name = String(req.query.agent_name) // SÉCURISATION SAST [CWE-943]
+        if (req.query.source)      filter.source     = String(req.query.source) // SÉCURISATION SAST [CWE-943]
+        if (req.query.Source)      filter.source     = String(req.query.Source) // SÉCURISATION SAST [CWE-943]
+        if (req.query.title)       filter.title      = { $regex: String(req.query.title), $options: 'i' } // SÉCURISATION SAST [CWE-943]
 
         if (req.query.time_from || req.query.time_to) {
             filter.timestamp = {}
-            if (req.query.time_from) filter.timestamp.$gte = new Date(req.query.time_from)
+            if (req.query.time_from) filter.timestamp.$gte = new Date(String(req.query.time_from)) // SÉCURISATION SAST [CWE-943]
             if (req.query.time_to) {
-                const to = new Date(req.query.time_to)
+                const to = new Date(String(req.query.time_to)) // SÉCURISATION SAST [CWE-943]
                 to.setHours(23, 59, 59, 999)
                 filter.timestamp.$lte = to
             }
@@ -59,7 +59,7 @@ const getIncidentById = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'VIEW_INCIDENT_DETAILS')
         if (!allowed) return res.status(403).json({ message: 'Permission required: VIEW_INCIDENT_DETAILS' })
-        const incident = await Incident.findById(req.params.id)
+        const incident = await Incident.findById(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
         res.status(200).json(incident.toObject({ virtuals: true }))
     } catch (error) {
@@ -95,34 +95,28 @@ const createIncident = async (req, res) => {
             return res.status(400).json({ message: 'title, description and severity are required.' })
         }
 
-        // ── Validation: title (texte simple) ──────────────────────────────
         if (!isSimpleText(title)) {
             return res.status(400).json({ message: 'Le titre contient des caractères non autorisés (lettres, chiffres, espaces, - et _ uniquement).' })
         }
 
-        // ── Validation: description (texte long, sanitization) ─────────────
         if (typeof description !== 'string' || !isSafeLongText(description)) {
             return res.status(400).json({ message: 'La description contient des caractères non autorisés ($).' })
         }
         const cleanDescription = sanitizeLongText(description)
 
-        // ── Validation: severity (enum) ─────────────────────────────────────
         const parsedSeverity = parseInt(severity)
         if (!isInEnum(parsedSeverity, INCIDENT_SEVERITIES)) {
             return res.status(400).json({ message: `severity invalide. Valeurs autorisées: ${INCIDENT_SEVERITIES.join(', ')}.` })
         }
 
-        // ── Validation: agent_name (texte simple, optionnel) ─────────────────
         if (agent_name !== undefined && agent_name !== null && agent_name !== '' && !isSimpleText(agent_name)) {
             return res.status(400).json({ message: 'agent_name contient des caractères non autorisés.' })
         }
 
-        // ── Validation: rule_id (texte simple, optionnel) ────────────────────
         if (rule_id !== undefined && rule_id !== null && rule_id !== '' && !isSimpleText(String(rule_id))) {
             return res.status(400).json({ message: 'rule_id contient des caractères non autorisés.' })
         }
 
-        // ── Validation: rule_level (numérique, optionnel) ────────────────────
         let parsedRuleLevel = null
         if (rule_level !== undefined && rule_level !== null && rule_level !== '') {
             parsedRuleLevel = parseInt(rule_level)
@@ -157,7 +151,7 @@ const createIncident = async (req, res) => {
                 },
             })
         } catch (logError) {
-            console.error('[createIncident] logAction failed:', logError?.message || logError)
+            console.error('[createIncident] logAction failed: %s', logError?.message || logError) // SÉCURISATION SAST [CWE-134]
         }
 
         res.status(201).json({ message: 'Incident created successfully.' })
@@ -170,19 +164,17 @@ const updateIncident = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'UPDATE_INCIDENT')
         if (!allowed) return res.status(403).json({ message: 'Permission required: UPDATE_INCIDENT' })
-        const incident = await Incident.findById(req.params.id)
+        const incident = await Incident.findById(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
 
         const body = { ...req.body }
 
-        // ── Validation: title ────────────────────────────────────────────
         if (body.title !== undefined) {
             if (!isSimpleText(body.title)) {
                 return res.status(400).json({ message: 'Le titre contient des caractères non autorisés (lettres, chiffres, espaces, - et _ uniquement).' })
             }
         }
 
-        // ── Validation: description ──────────────────────────────────────
         if (body.description !== undefined) {
             if (typeof body.description !== 'string' || !isSafeLongText(body.description)) {
                 return res.status(400).json({ message: 'La description contient des caractères non autorisés ($).' })
@@ -190,7 +182,6 @@ const updateIncident = async (req, res) => {
             body.description = sanitizeLongText(body.description)
         }
 
-        // ── Validation: severity (enum) ──────────────────────────────────
         if (body.severity !== undefined) {
             const parsedSeverity = parseInt(body.severity)
             if (!isInEnum(parsedSeverity, INCIDENT_SEVERITIES)) {
@@ -199,24 +190,20 @@ const updateIncident = async (req, res) => {
             body.severity = parsedSeverity
         }
 
-        // ── Validation: status (enum) ────────────────────────────────────
         if (body.status !== undefined) {
             if (!isInEnum(body.status, INCIDENT_STATUSES)) {
                 return res.status(400).json({ message: `status invalide. Valeurs autorisées: ${INCIDENT_STATUSES.join(', ')}.` })
             }
         }
 
-        // ── Validation: agent_name ───────────────────────────────────────
         if (body.agent_name !== undefined && body.agent_name !== null && body.agent_name !== '' && !isSimpleText(body.agent_name)) {
             return res.status(400).json({ message: 'agent_name contient des caractères non autorisés.' })
         }
 
-        // ── Validation: rule_id ───────────────────────────────────────────
         if (body.rule_id !== undefined && body.rule_id !== null && body.rule_id !== '' && !isSimpleText(String(body.rule_id))) {
             return res.status(400).json({ message: 'rule_id contient des caractères non autorisés.' })
         }
 
-        // ── Validation: rule_level ─────────────────────────────────────────
         if (body.rule_level !== undefined && body.rule_level !== null && body.rule_level !== '') {
             const parsedRuleLevel = parseInt(body.rule_level)
             if (Number.isNaN(parsedRuleLevel)) {
@@ -225,7 +212,7 @@ const updateIncident = async (req, res) => {
             body.rule_level = parsedRuleLevel
         }
 
-        const updated = await Incident.findByIdAndUpdate(req.params.id, body, { new: true })
+        const updated = await Incident.findByIdAndUpdate(String(req.params.id), body, { new: true }) // SÉCURISATION SAST [CWE-943]
 
         try {
             await logAction(req, {
@@ -239,7 +226,7 @@ const updateIncident = async (req, res) => {
                 },
             })
         } catch (logError) {
-            console.error('[updateIncident] logAction failed:', logError?.message || logError)
+            console.error('[updateIncident] logAction failed: %s', logError?.message || logError) // SÉCURISATION SAST [CWE-134]
         }
 
         res.status(200).json({ message: 'Incident updated successfully.', incident: updated })
@@ -252,9 +239,9 @@ const deleteIncident = async (req, res) => {
     try {
         const allowed = hasPermission(req, 'DELETE_INCIDENT')
         if (!allowed) return res.status(403).json({ message: 'Permission required: DELETE_INCIDENT' })
-        const incident = await Incident.findById(req.params.id)
+        const incident = await Incident.findById(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
         if (!incident) return res.status(404).json({ message: 'Incident not found.' })
-        await Incident.findByIdAndDelete(req.params.id)
+        await Incident.findByIdAndDelete(String(req.params.id)) // SÉCURISATION SAST [CWE-943]
 
         try {
             await logAction(req, {
@@ -271,7 +258,7 @@ const deleteIncident = async (req, res) => {
                 },
             })
         } catch (logError) {
-            console.error('[deleteIncident] logAction failed:', logError?.message || logError)
+            console.error('[deleteIncident] logAction failed: %s', logError?.message || logError) // SÉCURISATION SAST [CWE-134]
         }
 
         res.status(200).json({ message: 'Incident deleted successfully.' })
@@ -297,7 +284,7 @@ const syncFromWazuh = async (req, res) => {
                 },
             })
         } catch (logError) {
-            console.error('[syncFromWazuh] logAction failed:', logError?.message || logError)
+            console.error('[syncFromWazuh] logAction failed: %s', logError?.message || logError) // SÉCURISATION SAST [CWE-134]
         }
 
         res.status(200).json({
@@ -305,7 +292,7 @@ const syncFromWazuh = async (req, res) => {
             data: result,
         })
     } catch (error) {
-        console.error('[syncFromWazuh]', error.message)
+        console.error('[syncFromWazuh] %s', error.message) // SÉCURISATION SAST [CWE-134]
 
         try {
             await logAction(req, {
@@ -318,7 +305,7 @@ const syncFromWazuh = async (req, res) => {
                 status: 'failure',
             })
         } catch (logError) {
-            console.error('[syncFromWazuh] logAction failed:', logError?.message || logError)
+            console.error('[syncFromWazuh] logAction failed: %s', logError?.message || logError) // SÉCURISATION SAST [CWE-134]
         }
 
         res.status(500).json({ message: 'Sync failed (Check server logs).' })

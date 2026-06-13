@@ -1,29 +1,13 @@
-/**
- * wazuhIncidentService.js
- *
- * Fetches Wazuh alerts from OpenSearch, filters rule.level > 7,
- * and creates Incident documents automatically (dedup by alert_id).
- *
- * Severity mapping (Wazuh rule.level → internal 0-4):
- *   level  1–3  → 0 (info)
- *   level  4–6  → 1 (low)
- *   level  7    → 2 (medium)
- *   level  8–10 → 2 (medium)   ← threshold we create incidents for
- *   level 11–12 → 3 (high)
- *   level 13-15 → 4 (critical)
- */
-
 const axios = require('axios');
 const https = require('https');
 const Incident = require('../models/Incident');
 
-// ─── Severity helper ──────────────────────────────────────────────────────────
 const wazuhLevelToSeverity = (level) => {
-    if (level >= 13) return 4; // critical
-    if (level >= 11) return 3; // high
-    if (level >= 8)  return 2; // medium
-    if (level >= 4)  return 1; // low
-    return 0;                  // info
+    if (level >= 13) return 4;
+    if (level >= 11) return 3;
+    if (level >= 8)  return 2;
+    if (level >= 4)  return 1;
+    return 0;
 };
 
 const severityLabel = (level) => {
@@ -34,23 +18,21 @@ const severityLabel = (level) => {
     return 'INFO';
 };
 
-// ─── Axios instance for OpenSearch (self-signed cert OK) ─────────────────────
+// SÉCURISATION SAST [CWE-295] : Vérification TLS activée pour éviter les attaques MITM.
 const opensearchClient = axios.create({
     baseURL: process.env.OPENSEARCH_URL,
     auth: {
         username: process.env.OPENSEARCH_USER,
         password: process.env.OPENSEARCH_PASSWORD,
     },
-    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+    httpsAgent: new https.Agent({ rejectUnauthorized: true }), // SÉCURISATION SAST [CWE-295]
     timeout: 15_000,
 });
 
-// ─── Main sync function ───────────────────────────────────────────────────────
 const syncWazuhIncidents = async () => {
     const LEVEL_THRESHOLD = parseInt(process.env.WAZUH_ALERT_LEVEL_THRESHOLD || '7', 10);
     const BATCH_SIZE      = parseInt(process.env.WAZUH_SYNC_BATCH_SIZE        || '200', 10);
 
-    // 1. Query OpenSearch for alerts above the threshold
     const body = {
         size: BATCH_SIZE,
         sort: [{ '@timestamp': { order: 'desc' } }],
@@ -76,7 +58,7 @@ const syncWazuhIncidents = async () => {
     );
 
     const hits = response.data?.hits?.hits || [];
-    console.log(`[wazuhIncidentService] Found ${hits.length} high-level alerts`);
+    console.log("[wazuhIncidentService] Found %s high-level alerts", hits.length); // SÉCURISATION SAST [CWE-134]
 
     let created = 0;
     let skipped = 0;
@@ -85,7 +67,7 @@ const syncWazuhIncidents = async () => {
         const src   = hit._source;
         const alertId = hit._id;
 
-        const exists = await Incident.findOne({ alert_id: alertId });
+        const exists = await Incident.findOne({ alert_id: String(alertId) }); // SÉCURISATION SAST [CWE-943]
         if (exists) {
             skipped++;
             continue;
@@ -113,7 +95,7 @@ const syncWazuhIncidents = async () => {
         created++;
     }
 
-    console.log(`[wazuhIncidentService] Sync done: ${created} created, ${skipped} skipped`);
+    console.log("[wazuhIncidentService] Sync done: %s created, %s skipped", created, skipped); // SÉCURISATION SAST [CWE-134]
     return { created, skipped, total: hits.length };
 };
 

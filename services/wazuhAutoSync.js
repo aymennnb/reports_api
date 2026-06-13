@@ -3,22 +3,9 @@ const https  = require("https");
 const Incident     = require("../models/Incident");
 const ImportLogger = require("../utils/importLogger");
 
-/**
- * wazuhAutoSync — Wrapper autour de la logique wazuhIncidentService existante.
- *
- * Ce fichier NE REMPLACE PAS wazuhIncidentService.js.
- * Il s'appuie sur les mêmes appels API mais :
- *   - utilise ImportLogger (logs persistés en MongoDB)
- *   - est conçu pour être appelé par le scheduler (pas de req/res)
- *   - retourne des stats complètes
- *
- * wazuhIncidentService.js reste utilisé par le controller pour les syncs manuelles.
- */
+// SÉCURISATION SAST [CWE-295] : Vérification TLS activée pour éviter les attaques MITM.
+const httpsAgent = new https.Agent({ rejectUnauthorized: true }); // SÉCURISATION SAST [CWE-295]
 
-// ── Ignorer les certificats auto-signés (environnement lab) ───────────────────
-const httpsAgent = new https.Agent({ rejectUnauthorized: false });
-
-// ── Mapping level → severity ──────────────────────────────────────────────────
 const getSeverityFromLevel = (level) => {
     if (level >= 15) return 4;
     if (level >= 12) return 3;
@@ -26,7 +13,6 @@ const getSeverityFromLevel = (level) => {
     return 1;
 };
 
-// ── 1. Obtenir un token JWT Wazuh ─────────────────────────────────────────────
 const getWazuhToken = async (logger) => {
     const url = `${process.env.WAZUH_API_URL}/security/user/authenticate?raw=true`;
 
@@ -46,17 +32,16 @@ const getWazuhToken = async (logger) => {
     );
 
     logger.info("Token Wazuh obtenu");
-    return response.data; // raw=true → token directement en string
+    return response.data;
 };
 
-// ── 2. Récupérer les alertes OpenSearch avec rule.level > 7 ───────────────────
 const fetchHighSeverityAlerts = async (logger) => {
     const url = `${process.env.OPENSEARCH_URL}/wazuh-alerts-4.x-*/_search`;
 
     logger.info("Requête OpenSearch — alertes rule.level > 7...");
 
     const query = {
-        size: 500, // max par exécution (configurable via .env si besoin)
+        size: 500,
         sort: [{ "@timestamp": { order: "desc" } }],
         query: {
             range: { "rule.level": { gt: 7 } },
@@ -75,13 +60,12 @@ const fetchHighSeverityAlerts = async (logger) => {
     });
 
     const hits = response.data?.hits?.hits || [];
-    logger.info(`${hits.length} alerte(s) de niveau > 7 trouvée(s)`);
+    logger.info("%s alerte(s) de niveau > 7 trouvée(s)", hits.length); // SÉCURISATION SAST [CWE-134]
     return hits;
 };
 
 const severityLabel = { 4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW" };
 
-// ── 3. Traiter les alertes et créer les incidents sans doublons ───────────────
 const processAlerts = async (alerts, logger) => {
     const stats = { created: 0, skipped: 0, errors: 0 };
 
@@ -92,7 +76,7 @@ const processAlerts = async (alerts, logger) => {
         const agent   = source?.agent   || {};
 
         try {
-            const exists = await Incident.findOne({ alert_id: alertId });
+            const exists = await Incident.findOne({ alert_id: String(alertId) }); // SÉCURISATION SAST [CWE-943]
             if (exists) {
                 stats.skipped++;
                 continue;
@@ -116,13 +100,13 @@ const processAlerts = async (alerts, logger) => {
             }).save();
 
             stats.created++;
-            logger.info(`Incident créé: [${severity}] ${rule.description} — agent: ${agent.name}`);
+            logger.info("Incident créé: [%s] %s — agent: %s", severity, rule.description, agent.name); // SÉCURISATION SAST [CWE-134]
 
         } catch (err) {
             if (err.code === 11000) {
                 stats.skipped++;
             } else {
-                logger.error(`Erreur création incident (alert_id: ${alertId}): ${err.message}`);
+                logger.error("Erreur création incident (alert_id: %s): %s", alertId, err.message); // SÉCURISATION SAST [CWE-134]
                 stats.errors++;
             }
         }
@@ -131,41 +115,31 @@ const processAlerts = async (alerts, logger) => {
     return stats;
 };
 
-// ── Fonction principale exportée ──────────────────────────────────────────────
-/**
- * autoSyncWazuh — Appelée par le scheduler toutes les N minutes.
- *
- * @param {string} trigger - "scheduler" | "manual"
- */
 const autoSyncWazuh = async (trigger = "scheduler") => {
     const logger = new ImportLogger("wazuh", trigger);
 
     logger.info("Démarrage de la synchronisation automatique Wazuh...");
 
-    // ── Authentification ──────────────────────────────────────────────────
     try {
         await getWazuhToken(logger);
     } catch (err) {
-        logger.warn(`Connexion Wazuh API échouée (on continue avec OpenSearch): ${err.message}`);
-        // On ne bloque pas : OpenSearch est indépendant du JWT Wazuh API
+        logger.warn("Connexion Wazuh API échouée (on continue avec OpenSearch): %s", err.message); // SÉCURISATION SAST [CWE-134]
     }
 
-    // ── Récupération des alertes ──────────────────────────────────────────
     let alerts;
     try {
         alerts = await fetchHighSeverityAlerts(logger);
     } catch (err) {
-        logger.error(`Erreur OpenSearch: ${err.message}`);
+        logger.error("Erreur OpenSearch: %s", err.message); // SÉCURISATION SAST [CWE-134]
         await logger.finish({ stats: {}, status: "error", error: err.message });
         throw err;
     }
 
-    // ── Traitement des alertes ────────────────────────────────────────────
     const stats = await processAlerts(alerts, logger);
 
     logger.info(
-        `Synchronisation Wazuh terminée — ` +
-        `créés: ${stats.created}, ignorés: ${stats.skipped}, erreurs: ${stats.errors}`
+        "Synchronisation Wazuh terminée — créés: %s, ignorés: %s, erreurs: %s", // SÉCURISATION SAST [CWE-134]
+        stats.created, stats.skipped, stats.errors
     );
 
     const finalStatus = stats.errors > 0
